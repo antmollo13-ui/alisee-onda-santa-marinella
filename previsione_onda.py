@@ -1,9 +1,11 @@
 """
-ALISEE ONDA — previsione 72h + dashboard + widget (SOLO ONDA). Il prodotto.
-Carica modello_onda.pkl, scarica il forecast marino 72h della boa RON Civitavecchia,
-applica la calibrazione, stampa la previsione, salva il CSV e RIGENERA a ogni run:
-  - dashboard.html : pagina completa (demo / uso interno)
-  - widget.html    : compatto, incorporabile dal cliente via <iframe>
+ALISEE — previsione onda + vento 72h per Santa Marinella. Il prodotto.
+Carica modello_onda.pkl e modello_vento.pkl, scarica i forecast (boa RON per l'onda,
+punto spot per il vento), applica la calibrazione e RIGENERA a ogni run:
+  - dashboard.html : pagina completa
+  - widget.html    : LA STESSA pagina, trasparente e senza cornice, per l'iframe
+                     sul sito del cliente (una miniatura compressa faceva schifo:
+                     il cliente incorpora la pagina buona, non una versione ridotta)
 """
 import os, pickle, datetime
 from zoneinfo import ZoneInfo
@@ -263,6 +265,13 @@ def _legenda():
                    for k in reversed(ORDINE))
 
 
+# In modalita' embed la pagina vive dentro un iframe sul sito del cliente:
+# sfondo trasparente (si adatta alla loro pagina) e niente padding esterno.
+CSS_EMBED = """
+body{background:transparent;padding:0}
+.wrap{max-width:none}
+"""
+
 CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,sans-serif;
@@ -323,7 +332,10 @@ def _vento_label(w_kn, w_dir):
     return "laterale", "#8b949e"
 
 
-def build_dashboard(df, wins):
+def build_dashboard(df, wins, embed=False):
+    """Genera la pagina. embed=False -> dashboard.html (pagina completa).
+    embed=True -> widget.html: STESSA pagina (e' quella che funziona), ma
+    trasparente e senza cornice, pronta per l'iframe sul sito del cliente."""
     now = df.iloc[0]
     pk = df.loc[df.hs_alisee.idxmax()]
     lbl, col = STATI[now.stato]
@@ -352,14 +364,25 @@ def build_dashboard(df, wins):
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
+    # Sulla pagina del cliente il nome dello spot e' gia' nel titolo della loro
+    # pagina: qui conta la previsione, e il credito ad ALISEE.
+    titolo = ('<h1><span class="dot"></span>Previsione onda e vento · 72h</h1>'
+              if embed else
+              f'<h1><span class="dot"></span>ALISEE <span>Onda</span> · {SPOT}</h1>')
+    firma = ('<div class="upd">aggiornata {} · <span style="color:#58a6ff">powered by '
+             'ALISEE</span></div>'.format(f"{gg(ultima)} {ultima:%H:%M}") if embed else
+             f'<div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} '
+             f'{ultima:%d/%m %H:%M}</b> (ora italiana){pross_txt} · boa RON Civitavecchia'
+             f' · previsione 72h</div>')
+
     doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="1800">
-<title>ALISEE Onda · {SPOT}</title><style>{CSS}</style></head><body><div class="wrap">
+<title>ALISEE Onda · {SPOT}</title>
+<style>{CSS}{CSS_EMBED if embed else ""}</style></head><body><div class="wrap">
 <div class="top">
-  <h1><span class="dot"></span>ALISEE <span>Onda</span> · {SPOT}</h1>
-  <div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} {ultima:%d/%m %H:%M}</b>
-    (ora italiana){pross_txt} · boa RON Civitavecchia · previsione 72h</div>
+  {titolo}
+  {firma}
 </div>
 
 <div class="hero">
@@ -420,62 +443,8 @@ def build_dashboard(df, wins):
   di anticipo entrambi sbagliano di più.
 </div>
 </div></body></html>"""
-    with open(os.path.join(BASE, "dashboard.html"), "w", encoding="utf-8") as f:
-        f.write(doc)
-
-
-def build_widget(df, wins):
-    """WIDGET INCORPORABILE — compatto, per la pagina spot del cliente:
-      <iframe src=".../widget.html" width="100%" height="380" style="border:0"></iframe>"""
-    now = df.iloc[0]
-    pk = df.loc[df.hs_alisee.idxmax()]
-    lbl, col = STATI[now.stato]
-    v_lbl, v_col = _vento_label(float(now.vento_kn), float(now.vento_dir))
-    win_txt = (f"{gg(wins[0][0])} {wins[0][0]:%d} {wins[0][0]:%H:%M}–{wins[0][1]:%H:%M} · fino a {wins[0][2]:.1f} m"
-               if wins else "nessuna onda ≥0,8 m nelle 72h")
-    chart = _chart(df, 600, 120, (24, 6, 8, 22), compatto=True)
-    ultima, _ = orari_run()
-
-    doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="1800">
-<title>Previsione onda · {SPOT}</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:transparent;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,sans-serif}}
-.w{{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:12px 14px}}
-.hd{{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;
-     font-size:12px;color:#8b949e}}
-.hd b{{color:#e6edf3;font-weight:600;font-size:13px}}
-.row{{display:flex;align-items:center;gap:14px;margin-bottom:10px}}
-.hs{{font-size:30px;font-weight:600;line-height:1}}
-.meta{{font-size:12px;color:#8b949e;margin-top:4px}}
-.pill{{display:inline-block;font-size:10px;font-weight:600;padding:1px 8px;border-radius:20px;color:#0d1117}}
-.side{{margin-left:auto;text-align:right;font-size:11px;color:#8b949e}}
-.side b{{display:block;font-size:15px;color:#e6edf3;font-weight:600}}
-.win{{font-size:11px;color:#8b949e;padding-top:8px;border-top:1px solid #21262d;
-      display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}}
-.lg{{margin-right:10px}} .lg i{{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}}
-.legend{{font-size:10px;color:#8b949e;padding-top:4px}}
-a{{color:#58a6ff;text-decoration:none}}
-</style></head><body><div class="w">
-  <div class="hd"><b>Previsione onda · 72h</b>
-    <span>run {gg(ultima)} {ultima:%H:%M} · <a href="#">ALISEE</a></span></div>
-  <div class="row">
-    {_bussola(now.wave_direction, 54)}
-    <div>
-      <div class="hs">{now.hs_alisee:.1f} <span style="font-size:14px;color:#8b949e">m</span></div>
-      <div class="meta">{now.tp_alisee:.0f}s · da {onda_cardinale(now.wave_direction)}
-        <span class="pill" style="background:{col}">{lbl}</span></div>
-    </div>
-    <div class="side"><b style="color:{v_col}">{now.vento_kn:.0f} kn {onda_cardinale(now.vento_dir)}</b>{v_lbl}
-      <b style="margin-top:4px">{pk.hs_alisee:.1f} m</b>picco {gg(pk.date)} {pk.date:%H}h</div>
-  </div>
-  {chart}
-  <div class="legend">{_legenda()}</div>
-  <div class="win"><span>prossima finestra: {win_txt}</span><span>boa RON · 8 km</span></div>
-</div></body></html>"""
-    with open(os.path.join(BASE, "widget.html"), "w", encoding="utf-8") as f:
+    nome = "widget.html" if embed else "dashboard.html"
+    with open(os.path.join(BASE, nome), "w", encoding="utf-8") as f:
         f.write(doc)
 
 
@@ -500,6 +469,6 @@ if __name__ == "__main__":
     df[["date", "hs_alisee", "tp_alisee", "wave_direction", "wave_height",
         "swell_pct", "stato"]].to_csv(os.path.join(BASE, "previsione_onda_72h.csv"),
                                       index=False)
-    build_dashboard(df, wins)
-    build_widget(df, wins)
+    build_dashboard(df, wins)                  # dashboard.html — pagina completa
+    build_dashboard(df, wins, embed=True)      # widget.html — stessa pagina, per iframe
     print("\nprevisione_onda_72h.csv + dashboard.html + widget.html aggiornati.")
