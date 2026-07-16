@@ -1,0 +1,505 @@
+"""
+ALISEE ONDA — previsione 72h + dashboard + widget (SOLO ONDA). Il prodotto.
+Carica modello_onda.pkl, scarica il forecast marino 72h della boa RON Civitavecchia,
+applica la calibrazione, stampa la previsione, salva il CSV e RIGENERA a ogni run:
+  - dashboard.html : pagina completa (demo / uso interno)
+  - widget.html    : compatto, incorporabile dal cliente via <iframe>
+"""
+import os, pickle, datetime
+from zoneinfo import ZoneInfo
+import numpy as np
+import pandas as pd
+import requests
+from onda_features import MARINE_HOURLY, build_features, onda_cardinale
+from vento_features import (FEAT as FEAT_V, MODELLI, NWP_HOURLY, NWP_850,
+                            build_features as feat_vento, DIR_OFFSHORE)
+
+# Fuso ancorato: sul cloud (GitHub Actions) il sistema e' in UTC — senza questo
+# la dashboard mostrerebbe l'ora UTC spacciandola per ora italiana.
+ROMA = ZoneInfo("Europe/Rome")
+# Ore UTC del cron (allineate all'uscita delle run del modello d'onda)
+CRON_UTC = [5, 11, 17, 23]
+
+# Percorso portabile: la cartella dello script (funziona su Windows e su Linux/cloud)
+BASE = os.path.dirname(os.path.abspath(__file__))
+LAT_BOA, LON_BOA = 42.05, 11.70      # boa RON (onda)
+LAT_SPOT, LON_SPOT = 42.034, 11.849  # spot (vento)
+SPOT = "Santa Marinella"
+
+# Skill validata OOS in UNITA' REALI (non percentuali astratte).
+# Fonte: alisee_onda.py (test 2026, 4.666 ore) e alisee_vento.py (test 2025, 8.571 ore),
+# riproducibili con benchmark_baseline.py. Errore medio assoluto vs strumento.
+SKILL = [
+    # (cosa, errore ALISEE, errore modello standard, unita', decimali)
+    ("altezza onda", 12,   17,   "cm", 0),
+    ("periodo",      0.54, 0.86, "s",  2),
+    ("vento",        1.16, 1.71, "kn", 2),
+]
+SKILL_ORE = "13.000"   # ore di confronto totali (onda 4.666 + vento 8.571)
+
+STATI = {  # stato -> (etichetta, colore)
+    "piatto":      ("piatto",    "#484f58"),
+    "piccolo":     ("piccolo",   "#6e7681"),
+    "mosso/corto": ("mosso",     "#d29922"),
+    "surfabile":   ("surfabile", "#58a6ff"),
+    "BUONO":       ("buono",     "#3fb950"),
+}
+ORDINE = ["piatto", "piccolo", "mosso/corto", "surfabile", "BUONO"]
+
+
+_GG = {0: "lun", 1: "mar", 2: "mer", 3: "gio", 4: "ven", 5: "sab", 6: "dom"}
+
+
+def gg(ts):
+    """Giorno abbreviato in italiano (%a dipende dal locale di sistema)."""
+    return _GG[pd.Timestamp(ts).weekday()]
+
+
+def orari_run():
+    """(ultima run, prossima run) in ora italiana. L'ultima e' adesso (la run in
+    corso); la prossima si ricava dal cron UTC del workflow."""
+    ora = datetime.datetime.now(ROMA)
+    u = datetime.datetime.now(datetime.timezone.utc)
+    cand = []
+    for giorno in (0, 1):
+        for h in CRON_UTC:
+            t = (u + datetime.timedelta(days=giorno)).replace(
+                hour=h, minute=0, second=0, microsecond=0)
+            if t > u:
+                cand.append(t)
+    prossima = min(cand).astimezone(ROMA) if cand else None
+    return ora, prossima
+
+
+def comp_offshore(w_dir):
+    """+1 = vento da terra (pettina l'onda), -1 = da mare (la rovina)."""
+    return float(np.cos(np.radians(float(w_dir or 0) - DIR_OFFSHORE)))
+
+
+def giudizio(hs, tp, w_kn=0.0, w_dir=0.0):
+    """Qualita' surf: onda (size + periodo) MODULATA dal vento.
+    L'onshore teso rovina anche un'onda formata; l'offshore la pulisce."""
+    if hs < 0.5:  return "piatto"
+    if hs < 0.8:  return "piccolo"
+    off = comp_offshore(w_dir)
+    if w_kn >= 12 and off < -0.3:  return "mosso/corto"   # onshore teso: chop
+    if tp < 5:                      return "mosso/corto"   # mare corto da vento
+    if hs >= 1.2 and tp >= 6 and (w_kn < 8 or off > 0.3):
+        return "BUONO"                                     # formata + vento amico
+    return "surfabile"
+
+
+def _get(url, params):
+    r = requests.get(url, params=params, timeout=90)
+    r.raise_for_status()
+    d = pd.DataFrame(r.json()["hourly"]).rename(columns={"time": "date"})
+    d["date"] = pd.to_datetime(d["date"])
+    return d
+
+
+def scarica_e_prevedi():
+    with open(os.path.join(BASE, "modello_onda.pkl"), "rb") as f:
+        MO = pickle.load(f)
+    with open(os.path.join(BASE, "modello_vento.pkl"), "rb") as f:
+        MV = pickle.load(f)
+
+    # ── ONDA (boa) — MARINE_HOURLY = variabili del modello; la SST e' display
+    dm = _get("https://marine-api.open-meteo.com/v1/marine",
+              {"latitude": LAT_BOA, "longitude": LON_BOA,
+               "hourly": MARINE_HOURLY + ",sea_surface_temperature",
+               "timezone": "Europe/Rome", "forecast_days": 3})
+    df = build_features(dm)
+    df["hs_alisee"] = np.clip(MO["hs"].predict(df[MO["feat"]]), 0, None)
+    df["tp_alisee"] = np.clip(MO["tp"].predict(df[MO["feat"]]), 0, None)
+    tot = (df["swell_wave_height"].fillna(0) + df["wind_wave_height"].fillna(0)).clip(lower=0.01)
+    df["swell_pct"] = (df["swell_wave_height"].fillna(0) / tot * 100).clip(0, 100)
+
+    # ── VENTO (spot) — atmosferico + 850hPa + SST della boa
+    da = _get("https://api.open-meteo.com/v1/forecast",
+              {"latitude": LAT_SPOT, "longitude": LON_SPOT, "hourly": NWP_HOURLY,
+               "models": ",".join(MODELLI), "wind_speed_unit": "kn",
+               "timezone": "Europe/Rome", "forecast_days": 3})
+    d8 = _get("https://api.open-meteo.com/v1/forecast",
+              {"latitude": LAT_SPOT, "longitude": LON_SPOT, "hourly": NWP_850,
+               "models": "icon_seamless", "wind_speed_unit": "kn",
+               "timezone": "Europe/Rome", "forecast_days": 3})
+    dv = da.merge(d8, on="date", how="left").merge(
+        dm[["date", "sea_surface_temperature"]].rename(
+            columns={"sea_surface_temperature": "sst"}), on="date", how="left")
+    dv = feat_vento(dv)
+    dv["vento_kn"] = np.clip(MV["m"].predict(dv[MV["feat"]]), 0, None)
+    dv["vento_dir"] = dv["wind_direction_10m_icon_seamless"].fillna(0)
+    dv["vento_icon"] = dv["wind_speed_10m_icon_seamless"]
+
+    df = df.merge(dv[["date", "vento_kn", "vento_dir", "vento_icon"]],
+                  on="date", how="left")
+    df[["vento_kn", "vento_dir"]] = df[["vento_kn", "vento_dir"]].ffill().bfill()
+    df["stato"] = [giudizio(h, t, w, d) for h, t, w, d in
+                   zip(df.hs_alisee, df.tp_alisee, df.vento_kn, df.vento_dir)]
+    ora = pd.Timestamp.now().floor("h")
+    return df[df.date >= ora].reset_index(drop=True)
+
+
+def finestre(df, soglia=0.8):
+    surf = df[df.hs_alisee >= soglia].copy()
+    out = []
+    if not surf.empty:
+        surf["blk"] = (surf["date"].diff() > pd.Timedelta("1h")).cumsum()
+        for _, g in surf.groupby("blk"):
+            imax = g.hs_alisee.idxmax()
+            out.append((g.date.min(), g.date.max(), g.loc[imax, "hs_alisee"],
+                        g.loc[imax, "tp_alisee"],
+                        onda_cardinale(g.loc[imax, "wave_direction"])))
+    return out
+
+
+def _bussola(direzione, size=64):
+    """Rosa con freccia nel verso di propagazione (l'onda VIENE da `direzione`)."""
+    d = float(direzione or 0)
+    return f"""<svg viewBox="0 0 64 64" width="{size}" height="{size}">
+  <circle cx="32" cy="32" r="27" fill="none" stroke="#30363d" stroke-width="1"/>
+  <text x="32" y="10" text-anchor="middle" fill="#6e7681" font-size="8">N</text>
+  <text x="32" y="60" text-anchor="middle" fill="#6e7681" font-size="8">S</text>
+  <text x="58" y="35" text-anchor="middle" fill="#6e7681" font-size="8">E</text>
+  <text x="6"  y="35" text-anchor="middle" fill="#6e7681" font-size="8">O</text>
+  <g transform="rotate({d + 180:.0f} 32 32)">
+    <path d="M32 14 L38 42 L32 36 L26 42 Z" fill="#58a6ff"/>
+  </g></svg>"""
+
+
+def _chart(df, W, H, pad, compatto=False):
+    """Grafico Hs 72h: barre per stato + overlay NWP + (se non compatto) frecce dir."""
+    pl, pr, pt, pb = pad
+    n = len(df)
+    hs_max = max(1.0, float(df.hs_alisee.max()) * 1.18)
+    plot_h = H - pt - pb
+    bw = (W - pl - pr) / max(n, 1)
+
+    def y_of(v): return pt + plot_h * (1 - v / hs_max)
+
+    fs = 9 if compatto else 11
+    grid = ""
+    step = 0.5 if hs_max <= 2.5 else 1.0
+    v = 0.0
+    while v <= hs_max:
+        yy = y_of(v)
+        grid += (f'<line x1="{pl}" y1="{yy:.1f}" x2="{W-pr}" y2="{yy:.1f}" '
+                 f'stroke="#ffffff14" stroke-width="1"/>'
+                 f'<text x="{pl-5}" y="{yy+3:.1f}" text-anchor="end" fill="#6e7681" '
+                 f'font-size="{fs}">{v:.1f}</text>')
+        v += step
+
+    bars, nwp, daysep, daylab, arrows = "", [], "", "", ""
+    last_day = None
+    for i, (_, r) in enumerate(df.iterrows()):
+        x = pl + i * bw
+        yb = y_of(float(r.hs_alisee))
+        bars += (f'<rect x="{x+bw*0.1:.1f}" y="{yb:.1f}" width="{bw*0.8:.1f}" '
+                 f'height="{(H-pb)-yb:.1f}" fill="{STATI[r.stato][1]}" rx="1">'
+                 f'<title>{r.date:%d/%m %H:%M} — {r.hs_alisee:.1f} m · '
+                 f'{r.tp_alisee:.0f}s · {onda_cardinale(r.wave_direction)}</title></rect>')
+        nwp.append(f"{x+bw/2:.1f},{y_of(float(r.wave_height)):.1f}")
+        if not compatto and i % 6 == 0:
+            ang = float(r.wave_direction or 0) + 180
+            cx, cy = x + bw / 2, H - pb + 26
+            arrows += (f'<g transform="rotate({ang:.0f} {cx:.1f} {cy:.1f})">'
+                       f'<path d="M{cx:.1f} {cy-5:.1f} L{cx+3:.1f} {cy+4:.1f} '
+                       f'L{cx:.1f} {cy+1.5:.1f} L{cx-3:.1f} {cy+4:.1f} Z" fill="#8b949e"/></g>')
+        d = r.date.date()
+        if d != last_day:
+            if last_day is not None:
+                daysep += (f'<line x1="{x:.1f}" y1="{pt}" x2="{x:.1f}" y2="{H-pb}" '
+                           f'stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>')
+            lbl = f"{r.date:%d/%m}" if compatto else f"{gg(r.date)} {r.date:%d/%m}"
+            daylab += (f'<text x="{x+3:.1f}" y="{H-pb+13:.0f}" fill="#8b949e" '
+                       f'font-size="{fs}">{lbl}</text>')
+            last_day = d
+    nwp_line = (f'<polyline points="{" ".join(nwp)}" fill="none" stroke="#8b949e" '
+                f'stroke-width="1.2" stroke-dasharray="4 3" opacity="0.65"/>')
+    return f'<svg viewBox="0 0 {W} {H}" width="100%">{grid}{daysep}{bars}{nwp_line}{daylab}{arrows}</svg>'
+
+
+def _giorni(df):
+    """Riepilogo per giorno: max Hs, stato al picco, finestra migliore."""
+    out = []
+    for d, g in df.groupby(df.date.dt.date):
+        imax = g.hs_alisee.idxmax()
+        r = g.loc[imax]
+        surf = g[g.hs_alisee >= 0.8]
+        win = (f"{surf.date.min():%H:%M}–{surf.date.max():%H:%M}"
+               if not surf.empty else "—")
+        out.append({"data": pd.Timestamp(d), "hs": r.hs_alisee, "tp": r.tp_alisee,
+                    "dir": onda_cardinale(r.wave_direction), "stato": r.stato,
+                    "win": win, "vento": r.vento_kn,
+                    "vdir": onda_cardinale(r.vento_dir)})
+    return out[:3]
+
+
+def _accuratezza():
+    """Blocco PRECISIONE. Non 'quanto sbagliamo' (frase da statistico, e negativa):
+    lo scarto tipico in unita' reali, col ± che tutti capiscono."""
+    def it(v, dec):
+        """Numero con la virgola decimale italiana."""
+        return f"{v:.{dec}f}".replace(".", ",")
+
+    righe = ""
+    for cosa, ali, std, u, dec in SKILL:
+        quota = ali / std * 100        # barra: il nostro scarto rispetto al loro
+        righe += (
+            f'<div class="ac">'
+            f'<div class="acn">{cosa}</div>'
+            f'  <div class="acr"><span class="acl">ALISEE</span>'
+            f'    <i style="width:{quota:.0f}%;background:#3fb950"></i>'
+            f'    <b>± {it(ali, dec)} {u}</b></div>'
+            f'  <div class="acr"><span class="acl">standard</span>'
+            f'    <i style="width:100%;background:#484f58"></i>'
+            f'    <b style="color:#8b949e">± {it(std, dec)} {u}</b></div>'
+            f'</div>')
+    return righe
+
+
+def _legenda():
+    return "".join(f'<span class="lg"><i style="background:{STATI[k][1]}"></i>{STATI[k][0]}</span>'
+                   for k in reversed(ORDINE))
+
+
+CSS = """
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,sans-serif;
+     padding:24px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px}
+h1{font-size:19px;font-weight:600;letter-spacing:-.01em}
+h1 span{color:#58a6ff}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:6px}
+.upd{font-size:12px;color:#6e7681}
+.hero{display:grid;grid-template-columns:1.25fr 1fr;gap:14px;margin-bottom:14px}
+.card{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:16px 18px}
+.k{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.now{display:flex;align-items:center;gap:18px}
+.hs{font-size:40px;font-weight:600;line-height:1;letter-spacing:-.02em}
+.meta{font-size:13px;color:#8b949e;margin-top:6px}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:20px;color:#0d1117}
+.mini{display:flex;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid #21262d}
+.mini div{flex:1}
+.mini .v{font-size:15px;font-weight:600}
+.mini .l{font-size:11px;color:#6e7681}
+.bar{height:5px;border-radius:3px;background:#30363d;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;background:#58a6ff}
+.big{font-size:26px;font-weight:600;line-height:1.15}
+.sub{font-size:13px;color:#8b949e;margin-top:3px}
+.chart{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 14px 8px;margin-bottom:14px}
+.ct{display:flex;justify-content:space-between;font-size:12px;color:#8b949e;margin:0 2px 10px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 2px 0;font-size:11px;color:#8b949e}
+.lg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
+.days{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.day .d{font-size:12px;color:#8b949e;text-transform:capitalize;margin-bottom:6px}
+.day .h{font-size:22px;font-weight:600}
+.day .w{font-size:12px;color:#6e7681;margin-top:4px}
+.foot{font-size:11px;color:#6e7681;border-top:1px solid #21262d;padding-top:12px;line-height:1.6}
+.acc{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
+.acch{font-size:13px;font-weight:600;margin-bottom:3px}
+.accs{font-size:11px;color:#6e7681;margin-bottom:12px}
+.acgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.acn{font-size:11px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.acr{display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:11px}
+.acl{color:#6e7681;width:48px;flex:none}
+.acr i{display:block;height:7px;border-radius:3px;max-width:110px}
+.acr b{font-size:12px;font-weight:600;white-space:nowrap}
+.acex{margin-top:14px;padding-top:11px;border-top:1px solid #21262d;font-size:12px;color:#8b949e}
+.acex b{color:#e6edf3;font-weight:600}
+@media(max-width:720px){.acgrid{grid-template-columns:1fr}}
+@media(max-width:720px){.hero,.days{grid-template-columns:1fr}}
+"""
+
+
+def _vento_label(w_kn, w_dir):
+    """Etichetta + colore del vento in ottica surf (non la sua forza in se')."""
+    off = comp_offshore(w_dir)
+    if w_kn < 5:                 return "calmo", "#3fb950"
+    if off > 0.3:                return "offshore", "#3fb950"    # pulisce l'onda
+    if off < -0.3 and w_kn >= 12: return "onshore teso", "#d29922"
+    if off < -0.3:               return "onshore", "#8b949e"
+    return "laterale", "#8b949e"
+
+
+def build_dashboard(df, wins):
+    now = df.iloc[0]
+    pk = df.loc[df.hs_alisee.idxmax()]
+    lbl, col = STATI[now.stato]
+    sst = float(now.get("sea_surface_temperature", float("nan")))
+    sst_txt = f"{sst:.0f}°" if sst == sst else "—"
+    swp = float(now.swell_pct)
+    v_lbl, v_col = _vento_label(float(now.vento_kn), float(now.vento_dir))
+
+    if wins:
+        a, b, hs, tp, dr = wins[0]
+        win_html = (f'<div class="big">{hs:.1f} m</div>'
+                    f'<div class="sub">{gg(a)} {a:%d} · {a:%H:%M}–{b:%H:%M} · {tp:.0f}s {dr}</div>')
+    else:
+        win_html = ('<div class="big" style="color:#6e7681">—</div>'
+                    '<div class="sub">nessuna onda ≥0,8 m nelle 72h</div>')
+
+    giorni = "".join(
+        f'<div class="card day"><div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
+        f'<div class="h">{g["hs"]:.1f} m <span class="pill" style="background:'
+        f'{STATI[g["stato"]][1]};font-size:10px">{STATI[g["stato"]][0]}</span></div>'
+        f'<div class="w">picco {g["tp"]:.0f}s {g["dir"]} · vento {g["vento"]:.0f}kn '
+        f'{g["vdir"]} · finestra {g["win"]}</div></div>'
+        for g in _giorni(df))
+
+    chart = _chart(df, 940, 250, (44, 14, 20, 52))
+    ultima, prossima = orari_run()
+    pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
+
+    doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="1800">
+<title>ALISEE Onda · {SPOT}</title><style>{CSS}</style></head><body><div class="wrap">
+<div class="top">
+  <h1><span class="dot"></span>ALISEE <span>Onda</span> · {SPOT}</h1>
+  <div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} {ultima:%d/%m %H:%M}</b>
+    (ora italiana){pross_txt} · boa RON Civitavecchia · previsione 72h</div>
+</div>
+
+<div class="hero">
+  <div class="card">
+    <div class="k">adesso</div>
+    <div class="now">
+      {_bussola(now.wave_direction, 72)}
+      <div>
+        <div class="hs">{now.hs_alisee:.1f} <span style="font-size:18px;color:#8b949e">m</span></div>
+        <div class="meta">{now.tp_alisee:.0f}s · da {onda_cardinale(now.wave_direction)}
+          &nbsp;<span class="pill" style="background:{col}">{lbl}</span></div>
+      </div>
+    </div>
+    <div class="mini">
+      <div><div class="v" style="color:{v_col}">{now.vento_kn:.0f} kn</div>
+        <div class="l">vento {onda_cardinale(now.vento_dir)} · {v_lbl}</div></div>
+      <div><div class="v">{sst_txt}</div><div class="l">acqua</div></div>
+      <div><div class="v">{swp:.0f}%</div><div class="l">mare lungo</div>
+        <div class="bar"><i style="width:{swp:.0f}%"></i></div></div>
+      <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">picco · {gg(pk.date)} {pk.date:%H}h</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="k">prossima finestra surfabile</div>
+    {win_html}
+    <div class="mini"><div><div class="l" style="line-height:1.6">Finestra = onda ≥0,8 m.
+      Il colore delle barre combina altezza e periodo: mare lungo e formato = buono,
+      corto e disordinato = mosso.</div></div></div>
+  </div>
+</div>
+
+<div class="chart">
+  <div class="ct"><span>altezza onda · prossime 72 ore</span>
+    <span>— — modello standard &nbsp;|&nbsp; ▲ direzione</span></div>
+  {chart}
+  <div class="legend">{_legenda()}</div>
+</div>
+
+<div class="days">{giorni}</div>
+
+<div class="acc">
+  <div class="acch">Quanto è precisa</div>
+  <div class="accs">Scarto medio da quello che gli strumenti misurano davvero, su tutte le
+    condizioni. Barra più corta = più precisa. (Media: circa 2 volte su 3 si sta dentro
+    questo scarto.)</div>
+  <div class="acgrid">{_accuratezza()}</div>
+  <div class="acex">In pratica, misurato: quando ALISEE dice <b>onda 1,5 m</b>, 8 volte su 10
+    il mare sta tra <b>1,1 e 1,8 m</b>. Sul mare piccolo lo scarto è minore (± 7 cm sotto i
+    40 cm), sulle mareggiate maggiore (± 32 cm sopra i 2 m): i numeri qui sopra sono la media
+    di tutte le condizioni.</div>
+</div>
+
+<div class="foot">
+  Misurato su ~{SKILL_ORE} ore di confronto con la <b>boa ondametrica RON</b> (onda) e la
+  <b>stazione RMN di Civitavecchia</b> (vento), entrambe a ~8 km dallo spot, su periodi che il
+  modello non aveva mai visto in addestramento. "Standard" = il modello meteo pubblico da cui
+  partono i siti di previsione. I valori sono l'errore sull'analisi: su una previsione a 72 ore
+  di anticipo entrambi sbagliano di più.
+</div>
+</div></body></html>"""
+    with open(os.path.join(BASE, "dashboard.html"), "w", encoding="utf-8") as f:
+        f.write(doc)
+
+
+def build_widget(df, wins):
+    """WIDGET INCORPORABILE — compatto, per la pagina spot del cliente:
+      <iframe src=".../widget.html" width="100%" height="380" style="border:0"></iframe>"""
+    now = df.iloc[0]
+    pk = df.loc[df.hs_alisee.idxmax()]
+    lbl, col = STATI[now.stato]
+    v_lbl, v_col = _vento_label(float(now.vento_kn), float(now.vento_dir))
+    win_txt = (f"{gg(wins[0][0])} {wins[0][0]:%d} {wins[0][0]:%H:%M}–{wins[0][1]:%H:%M} · fino a {wins[0][2]:.1f} m"
+               if wins else "nessuna onda ≥0,8 m nelle 72h")
+    chart = _chart(df, 600, 120, (24, 6, 8, 22), compatto=True)
+    ultima, _ = orari_run()
+
+    doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="1800">
+<title>Previsione onda · {SPOT}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:transparent;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,sans-serif}}
+.w{{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:12px 14px}}
+.hd{{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;
+     font-size:12px;color:#8b949e}}
+.hd b{{color:#e6edf3;font-weight:600;font-size:13px}}
+.row{{display:flex;align-items:center;gap:14px;margin-bottom:10px}}
+.hs{{font-size:30px;font-weight:600;line-height:1}}
+.meta{{font-size:12px;color:#8b949e;margin-top:4px}}
+.pill{{display:inline-block;font-size:10px;font-weight:600;padding:1px 8px;border-radius:20px;color:#0d1117}}
+.side{{margin-left:auto;text-align:right;font-size:11px;color:#8b949e}}
+.side b{{display:block;font-size:15px;color:#e6edf3;font-weight:600}}
+.win{{font-size:11px;color:#8b949e;padding-top:8px;border-top:1px solid #21262d;
+      display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}}
+.lg{{margin-right:10px}} .lg i{{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}}
+.legend{{font-size:10px;color:#8b949e;padding-top:4px}}
+a{{color:#58a6ff;text-decoration:none}}
+</style></head><body><div class="w">
+  <div class="hd"><b>Previsione onda · 72h</b>
+    <span>run {gg(ultima)} {ultima:%H:%M} · <a href="#">ALISEE</a></span></div>
+  <div class="row">
+    {_bussola(now.wave_direction, 54)}
+    <div>
+      <div class="hs">{now.hs_alisee:.1f} <span style="font-size:14px;color:#8b949e">m</span></div>
+      <div class="meta">{now.tp_alisee:.0f}s · da {onda_cardinale(now.wave_direction)}
+        <span class="pill" style="background:{col}">{lbl}</span></div>
+    </div>
+    <div class="side"><b style="color:{v_col}">{now.vento_kn:.0f} kn {onda_cardinale(now.vento_dir)}</b>{v_lbl}
+      <b style="margin-top:4px">{pk.hs_alisee:.1f} m</b>picco {gg(pk.date)} {pk.date:%H}h</div>
+  </div>
+  {chart}
+  <div class="legend">{_legenda()}</div>
+  <div class="win"><span>prossima finestra: {win_txt}</span><span>boa RON · 8 km</span></div>
+</div></body></html>"""
+    with open(os.path.join(BASE, "widget.html"), "w", encoding="utf-8") as f:
+        f.write(doc)
+
+
+if __name__ == "__main__":
+    df = scarica_e_prevedi()
+    wins = finestre(df)
+
+    print("=" * 60)
+    print(f"  ALISEE ONDA — {SPOT} (boa RON Civitavecchia)  |  72h")
+    print("=" * 60)
+    print(f"{'quando':16s} {'Hs':>7s} {'Tp':>6s} {'dir':>5s}  stato")
+    for _, r in df.iloc[::2].iterrows():
+        print(f"{r['date']:%a %d/%m %H:%M} {r.hs_alisee:5.2f} m {r.tp_alisee:5.1f}s "
+              f"{onda_cardinale(r.wave_direction):>5s}  {r.stato}")
+    print("\n--- FINESTRE (Hs>=0.8m) ---")
+    if wins:
+        for a, b, hs, tp, d in wins:
+            print(f"  {a:%a %d/%m %H:%M} -> {b:%H:%M}  fino a {hs:.1f}m {tp:.0f}s {d}")
+    else:
+        print("  nessuna nelle prossime 72h")
+
+    df[["date", "hs_alisee", "tp_alisee", "wave_direction", "wave_height",
+        "swell_pct", "stato"]].to_csv(os.path.join(BASE, "previsione_onda_72h.csv"),
+                                      index=False)
+    build_dashboard(df, wins)
+    build_widget(df, wins)
+    print("\nprevisione_onda_72h.csv + dashboard.html + widget.html aggiornati.")

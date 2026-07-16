@@ -1,0 +1,5 @@
+numpy==2.4.4
+pandas==3.0.2
+requests
+xgboost==3.2.0
+scikit-learn==1.8.0

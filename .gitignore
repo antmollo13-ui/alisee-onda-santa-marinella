@@ -1,0 +1,22 @@
+# LISTA BIANCA: tutto escluso, si pubblica solo il minimo per far girare la previsione.
+# Restano fuori (e quindi privati): script di addestramento, benchmark, validazione,
+# dati storici grezzi, il modulo vento v21 e l'archivio.
+*
+
+!.gitignore
+!README.md
+
+# Codice di inferenza
+!previsione_onda.py
+!onda_features.py
+!vento_features.py
+
+# Modelli addestrati
+!modello_onda.pkl
+!modello_vento.pkl
+
+# Ambiente + automazione
+!requirements.txt
+!.github/
+!.github/workflows/
+!.github/workflows/dashboard.yml
