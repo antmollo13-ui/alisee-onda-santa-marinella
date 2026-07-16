@@ -30,6 +30,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Genera previsione + dashboard
+        # Co-branding sulla pagina PUBBLICA: accendere SOLO ad accordo fatto,
+        # aggiungendo qui sotto (senza il cancelletto):
+        #   env:
+        #     PARTNER: SurfCam Italia
         run: python previsione_onda.py
 
       - name: Prepara la cartella da pubblicare

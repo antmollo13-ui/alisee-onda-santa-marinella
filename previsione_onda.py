@@ -28,6 +28,11 @@ LAT_BOA, LON_BOA = 42.05, 11.70      # boa RON (onda)
 LAT_SPOT, LON_SPOT = 42.034, 11.849  # spot (vento)
 SPOT = "Santa Marinella"
 
+# Co-branding. Si accende con la variabile d'ambiente PARTNER (es. "SurfCam Italia").
+# Tenuto SPENTO di default: la pagina e' pubblica e il nome di un partner non va
+# esposto finche' non c'e' un accordo. Per la demo:  set PARTNER=SurfCam Italia
+PARTNER = os.environ.get("PARTNER", "").strip()
+
 # Skill validata OOS in UNITA' REALI (non percentuali astratte).
 # Fonte: alisee_onda.py (test 2026, 4.666 ore) e alisee_vento.py (test 2025, 8.571 ore),
 # riproducibili con benchmark_baseline.py. Errore medio assoluto vs strumento.
@@ -280,6 +285,7 @@ body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px}
 h1{font-size:19px;font-weight:600;letter-spacing:-.01em}
 h1 span{color:#58a6ff}
+h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:6px}
 .upd{font-size:12px;color:#6e7681}
 .hero{display:grid;grid-template-columns:1.25fr 1fr;gap:14px;margin-bottom:14px}
@@ -364,13 +370,16 @@ def build_dashboard(df, wins, embed=False):
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
+    # Marchio: solo ALISEE, oppure "ALISEE × Partner" se il co-branding e' acceso.
+    marchio = (f'ALISEE <span class="x">×</span> {PARTNER}' if PARTNER
+               else 'ALISEE <span>Onda</span>')
+
     # Sulla pagina del cliente il nome dello spot e' gia' nel titolo della loro
-    # pagina: qui conta la previsione, e il credito ad ALISEE.
-    titolo = ('<h1><span class="dot"></span>Previsione onda e vento · 72h</h1>'
-              if embed else
-              f'<h1><span class="dot"></span>ALISEE <span>Onda</span> · {SPOT}</h1>')
-    firma = ('<div class="upd">aggiornata {} · <span style="color:#58a6ff">powered by '
-             'ALISEE</span></div>'.format(f"{gg(ultima)} {ultima:%H:%M}") if embed else
+    # pagina: qui conta la previsione, e il marchio.
+    titolo = (f'<h1><span class="dot"></span>{marchio}</h1>' if embed
+              else f'<h1><span class="dot"></span>{marchio} · {SPOT}</h1>')
+    sotto_embed = (f'previsione onda e vento · 72h · aggiornata {gg(ultima)} {ultima:%H:%M}')
+    firma = (f'<div class="upd">{sotto_embed}</div>' if embed else
              f'<div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} '
              f'{ultima:%d/%m %H:%M}</b> (ora italiana){pross_txt} · boa RON Civitavecchia'
              f' · previsione 72h</div>')
