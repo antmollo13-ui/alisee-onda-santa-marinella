@@ -493,14 +493,11 @@ def build_dashboard(df, wins, embed=False):
             f"(standard: {f'{s:.{d}f}'.replace('.', ',')})"
             for c, a, s, u, d, m in SKILL)
         acc_html = (f'<div class="acc"><div class="accs" style="margin:0">'
-                    f'Verificata sul mare vero — errore medio su ~{SKILL_ORE} ore di '
-                    f'confronto con boa e stazione: {vals}.</div></div>')
+                    f'Verificata sul mare vero — errore medio: {vals}.</div></div>')
     else:
         acc_html = f"""<div class="acc">
   <div class="acch">Verificata sul mare vero</div>
-  <div class="accs">Abbiamo confrontato ~{SKILL_ORE} ore di previsioni con quello che la boa
-    e la stazione hanno poi misurato davvero. La barra mostra l'errore medio: più è corta,
-    meno si sbaglia.</div>
+  <div class="accs">La barra mostra l'errore medio misurato: più è corta, meno si sbaglia.</div>
   <div class="acgrid">{_accuratezza()}</div>
   <div class="acex">Un esempio concreto: quando la previsione dice <b>1,5 m</b>, 8 volte su 10
     il mare misurato è tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
