@@ -33,6 +33,14 @@ SPOT = "Santa Marinella"
 # esposto finche' non c'e' un accordo. Per la demo:  set PARTNER=SurfCam Italia
 PARTNER = os.environ.get("PARTNER", "").strip()
 
+# Ganci commerciali opzionali (env var, come PARTNER — spenti di default):
+#   CAM_URL -> bottone "Guarda la cam live": il momento buono spinge al live,
+#              che e' il prodotto premium della piattaforma.
+#   SPONSOR -> "previsione offerta da X": slot che la piattaforma puo' vendere
+#              ai supporter locali = linea di ricavo nuova.
+CAM_URL = os.environ.get("CAM_URL", "").strip()
+SPONSOR = os.environ.get("SPONSOR", "").strip()
+
 # Skill validata OOS in UNITA' REALI (non percentuali astratte).
 # Fonte: alisee_onda.py (test 2026, 4.666 ore) e alisee_vento.py (test 2025, 8.571 ore),
 # riproducibili con benchmark_baseline.py. Errore medio assoluto vs strumento.
@@ -138,10 +146,12 @@ def scarica_e_prevedi():
         MV = pickle.load(f)
 
     # ── ONDA (boa) — MARINE_HOURLY = variabili del modello; la SST e' display
+    # 5 giorni: 72h piene in grafico + giorni 4-5 come "tendenza" (motivo per
+    # tornare domani a controllare come evolve = visite ricorrenti).
     dm = _get("https://marine-api.open-meteo.com/v1/marine",
               {"latitude": LAT_BOA, "longitude": LON_BOA,
                "hourly": MARINE_HOURLY + ",sea_surface_temperature",
-               "timezone": "Europe/Rome", "forecast_days": 3})
+               "timezone": "Europe/Rome", "forecast_days": 5})
     df = build_features(dm)
     df["hs_alisee"] = np.clip(MO["hs"].predict(df[MO["feat"]]), 0, None)
     df["tp_alisee"] = np.clip(MO["tp"].predict(df[MO["feat"]]), 0, None)
@@ -152,11 +162,11 @@ def scarica_e_prevedi():
     da = _get("https://api.open-meteo.com/v1/forecast",
               {"latitude": LAT_SPOT, "longitude": LON_SPOT, "hourly": NWP_HOURLY,
                "models": ",".join(MODELLI), "wind_speed_unit": "kn",
-               "timezone": "Europe/Rome", "forecast_days": 3})
+               "timezone": "Europe/Rome", "forecast_days": 5})
     d8 = _get("https://api.open-meteo.com/v1/forecast",
               {"latitude": LAT_SPOT, "longitude": LON_SPOT, "hourly": NWP_850,
                "models": "icon_seamless", "wind_speed_unit": "kn",
-               "timezone": "Europe/Rome", "forecast_days": 3})
+               "timezone": "Europe/Rome", "forecast_days": 5})
     dv = da.merge(d8, on="date", how="left").merge(
         dm[["date", "sea_surface_temperature"]].rename(
             columns={"sea_surface_temperature": "sst"}), on="date", how="left")
@@ -178,7 +188,7 @@ def scarica_e_prevedi():
         rs = requests.get("https://api.open-meteo.com/v1/forecast", params={
             "latitude": LAT_SPOT, "longitude": LON_SPOT,
             "daily": "sunrise,sunset", "timezone": "Europe/Rome",
-            "forecast_days": 4}, timeout=90).json()["daily"]
+            "forecast_days": 6}, timeout=90).json()["daily"]
         sole = {pd.Timestamp(t).date(): (pd.Timestamp(a), pd.Timestamp(b))
                 for t, a, b in zip(rs["time"], rs["sunrise"], rs["sunset"])}
         df["luce"] = [bool(sole.get(t.date()) and
@@ -410,6 +420,15 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .foot{font-size:11px;color:#6e7681;border-top:1px solid #21262d;padding-top:12px;line-height:1.6}
 .brand{margin-top:10px;font-size:12px;color:#6e7681}
 .brand b{color:#58a6ff;letter-spacing:.03em}
+.trend{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:10px 18px;
+       margin-bottom:14px;font-size:13px}
+.trend b{color:#e6edf3;font-weight:600}
+.trend span{font-size:11px;color:#6e7681}
+.cta{display:inline-block;margin-top:12px;background:#238636;color:#fff;font-size:12px;
+     font-weight:600;padding:7px 14px;border-radius:8px;text-decoration:none}
+.cta:hover{background:#2ea043}
+.spons{color:#6e7681}
+.spons b{color:#e6edf3}
 .acc{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
 .acch{font-size:13px;font-weight:600;margin-bottom:3px}
 .accs{font-size:11px;color:#6e7681;margin-bottom:12px}
@@ -442,8 +461,15 @@ def build_dashboard(df, wins, embed=False):
     """Genera la pagina. embed=False -> dashboard.html (pagina completa).
     embed=True -> widget.html: STESSA pagina (e' quella che funziona), ma
     trasparente e senza cornice, pronta per l'iframe sul sito del cliente."""
-    now = df.iloc[0]
-    pk = df.loc[df.hs_alisee.idxmax()]
+    # 72h piene per grafico/card; i giorni 4-5 diventano la "tendenza"
+    t0 = df.date.iloc[0]
+    df72  = df[df.date <  t0 + pd.Timedelta("72h")]
+    oltre = df[df.date >= t0 + pd.Timedelta("72h")]
+    tnd = [(pd.Timestamp(d), float(g.hs_alisee.max()))
+           for d, g in oltre.groupby(oltre.date.dt.date)][:2]
+
+    now = df72.iloc[0]
+    pk = df72.loc[df72.hs_alisee.idxmax()]
     lbl, col = STATI[now.stato]
     sst = float(now.get("sea_surface_temperature", float("nan")))
     sst_txt = f"{sst:.0f}°" if sst == sst else "—"
@@ -456,8 +482,12 @@ def build_dashboard(df, wins, embed=False):
                     f'<div class="sub">{gg(a)} {a:%d} · {a:%H:%M}–{b:%H:%M} · {tp:.0f}s {dr}'
                     f'<br>probabile tra {w10:.1f} e {w90:.1f} m</div>')
     else:
+        # Giorno piatto: MAI un vicolo cieco — dai sempre un motivo per tornare.
+        risalita = next((f"possibile onda {gg(d)} (~{h:.1f} m): torna a controllare"
+                         for d, h in tnd if h >= 0.8),
+                        "piatto anche nella tendenza — ricontrolla domani")
         win_html = ('<div class="big" style="color:#6e7681">—</div>'
-                    '<div class="sub">nessuna onda ≥0,8 m nelle ore di luce delle prossime 72h</div>')
+                    f'<div class="sub">niente onda nelle 72h · {risalita}</div>')
 
     giorni = "".join(
         f'<div class="card day"><div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
@@ -465,9 +495,21 @@ def build_dashboard(df, wins, embed=False):
         f'{STATI[g["stato"]][1]};font-size:10px">{STATI[g["stato"]][0]}</span></div>'
         f'<div class="w">picco {g["tp"]:.0f}s {g["dir"]} · vento {g["vento"]:.0f}kn '
         f'{g["vdir"]} · finestra {g["win"]}</div></div>'
-        for g in _giorni(df))
+        for g in _giorni(df72))
 
-    chart = _chart(df)
+    # Tendenza 4-5 giorni: il motivo per tornare domani (e' il dato che evolve)
+    tnd_html = ""
+    if tnd:
+        tnd_txt = " · ".join(f"{gg(d)} {d:%d/%m} ~{h:.1f} m" for d, h in tnd)
+        tnd_html = (f'<div class="trend"><b>Tendenza:</b> {tnd_txt} '
+                    f'<span>· a 4-5 giorni l\'affidabilità cala, ricontrolla domani</span></div>')
+
+    # Gancio al prodotto premium della piattaforma: il momento buono -> la cam
+    cta = (f'<a class="cta" href="{CAM_URL}">Guarda la cam live →</a>' if CAM_URL else "")
+    spons = (f' <span class="spons">· previsione offerta da <b>{SPONSOR}</b></span>'
+             if SPONSOR else "")
+
+    chart = _chart(df72)
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
@@ -537,6 +579,7 @@ def build_dashboard(df, wins, embed=False):
   <div class="card">
     <div class="k">prossima finestra surfabile</div>
     {win_html}
+    {cta}
     <div class="mini"><div><div class="l" style="line-height:1.6">"Buono" = onda formata,
       swell da W/SW e vento amico. Finestre solo nelle ore di luce. "Probabile" = misurato
       alla boa: 8 volte su 10 il mare sta lì.</div></div></div>
@@ -553,6 +596,7 @@ def build_dashboard(df, wins, embed=False):
 </div>
 
 <div class="days">{giorni}</div>
+{tnd_html}
 
 {acc_html}
 
@@ -563,7 +607,7 @@ def build_dashboard(df, wins, embed=False):
   partono i siti di previsione. I valori sono l'errore sull'analisi: su una previsione a 72 ore
   di anticipo entrambi sbagliano di più.
 </div>
-<div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali</div>
+<div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali{spons}</div>
 </div></body></html>"""
     nome = "widget.html" if embed else "dashboard.html"
     with open(os.path.join(BASE, nome), "w", encoding="utf-8") as f:
@@ -571,14 +615,15 @@ def build_dashboard(df, wins, embed=False):
 
 
 if __name__ == "__main__":
-    df = scarica_e_prevedi()
-    wins = finestre(df)
+    df = scarica_e_prevedi()          # 5 giorni: 72h piene + tendenza
+    df72 = df[df.date < df.date.iloc[0] + pd.Timedelta("72h")]
+    wins = finestre(df72)             # le finestre si promettono solo sulle 72h
 
     print("=" * 60)
     print(f"  ALISEE ONDA — {SPOT} (boa RON Civitavecchia)  |  72h")
     print("=" * 60)
     print(f"{'quando':16s} {'Hs':>7s} {'Tp':>6s} {'dir':>5s}  stato")
-    for _, r in df.iloc[::2].iterrows():
+    for _, r in df72.iloc[::2].iterrows():
         print(f"{r['date']:%a %d/%m %H:%M} {r.hs_alisee:5.2f} m {r.tp_alisee:5.1f}s "
               f"{onda_cardinale(r.wave_direction):>5s}  {r.stato}")
     print("\n--- FINESTRE DIURNE (Hs>=0.8m, ore di luce) ---")
