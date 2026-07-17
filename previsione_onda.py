@@ -51,14 +51,18 @@ _BANDA_PRED = [0.20, 0.50, 0.70, 0.90, 1.15, 1.50, 1.95, 2.60]
 _BANDA_P10  = [0.13, 0.32, 0.46, 0.62, 0.83, 1.11, 1.36, 2.01]
 _BANDA_P90  = [0.40, 0.62, 0.83, 1.08, 1.44, 1.78, 2.43, 3.25]
 
-STATI = {  # stato -> (etichetta, colore)
+STATI = {  # stato -> (etichetta, colore). "piatto" e "piccolo" restano etichette
+    # distinte nelle card, ma nel grafico hanno LO STESSO grigio: per chi guarda
+    # sono la stessa notizia (niente da surfare), due grigi diversi erano rumore.
     "piatto":      ("piatto",    "#484f58"),
-    "piccolo":     ("piccolo",   "#6e7681"),
+    "piccolo":     ("piccolo",   "#484f58"),
     "mosso/corto": ("mosso",     "#d29922"),
     "surfabile":   ("surfabile", "#58a6ff"),
     "BUONO":       ("buono",     "#3fb950"),
 }
-ORDINE = ["piatto", "piccolo", "mosso/corto", "surfabile", "BUONO"]
+# Legenda del grafico: solo le classi che si VEDONO (4 colori, non 5 stati)
+_LEGENDA = [("buono", "#3fb950"), ("surfabile", "#58a6ff"),
+            ("mosso", "#d29922"), ("niente da surfare", "#484f58")]
 
 
 _GG = {0: "lun", 1: "mar", 2: "mer", 3: "gio", 4: "ven", 5: "sab", 6: "dom"}
@@ -337,8 +341,8 @@ def _accuratezza():
 
 
 def _legenda():
-    return "".join(f'<span class="lg"><i style="background:{STATI[k][1]}"></i>{STATI[k][0]}</span>'
-                   for k in reversed(ORDINE))
+    return "".join(f'<span class="lg"><i style="background:{c}"></i>{lab}</span>'
+                   for lab, c in _LEGENDA)
 
 
 # In modalita' embed la pagina vive dentro un iframe sul sito del cliente:
@@ -526,7 +530,7 @@ def build_dashboard(df, wins, embed=False):
     <span>— — modello standard</span></div>
   {chart}
   <div class="legend">{_legenda()}
-    <span class="lg"><i style="background:#58a6ff;opacity:.3"></i>fascia probabile (8 su 10)</span>
+    <span class="lg"><i style="background:#58a6ff;opacity:.3"></i>fascia probabile</span>
     <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span></div>
 </div>
 
