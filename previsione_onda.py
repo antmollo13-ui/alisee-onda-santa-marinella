@@ -37,10 +37,10 @@ PARTNER = os.environ.get("PARTNER", "").strip()
 # Fonte: alisee_onda.py (test 2026, 4.666 ore) e alisee_vento.py (test 2025, 8.571 ore),
 # riproducibili con benchmark_baseline.py. Errore medio assoluto vs strumento.
 SKILL = [
-    # (cosa, errore ALISEE, errore modello standard, unita', decimali)
-    ("altezza onda", 12,   17,   "cm", 0),
-    ("periodo",      0.54, 0.86, "s",  2),
-    ("vento",        1.16, 1.71, "kn", 2),
+    # (cosa, errore ALISEE, errore standard, unita', decimali, % errore in meno)
+    ("altezza onda", 12,   17,   "cm", 0, 28),
+    ("periodo",      0.54, 0.86, "s",  2, 37),
+    ("vento",        1.16, 1.71, "kn", 2, 32),
 ]
 SKILL_ORE = "13.000"   # ore di confronto totali (onda 4.666 + vento 8.571)
 
@@ -313,24 +313,25 @@ def _giorni(df):
 
 
 def _accuratezza():
-    """Blocco PRECISIONE. Non 'quanto sbagliamo' (frase da statistico, e negativa):
-    lo scarto tipico in unita' reali, col ± che tutti capiscono."""
+    """Blocco VERIFICA in linguaggio semplice: quanto si sbaglia in media (unita'
+    reali), e quanto errore in meno rispetto al modello standard. Niente ±, niente
+    gergo: 'sbaglia di 12 cm' lo capisce chiunque."""
     def it(v, dec):
         """Numero con la virgola decimale italiana."""
         return f"{v:.{dec}f}".replace(".", ",")
 
     righe = ""
-    for cosa, ali, std, u, dec in SKILL:
-        quota = ali / std * 100        # barra: il nostro scarto rispetto al loro
+    for cosa, ali, std, u, dec, migl in SKILL:
+        quota = ali / std * 100        # barra: il nostro errore rispetto al loro
         righe += (
             f'<div class="ac">'
-            f'<div class="acn">{cosa}</div>'
+            f'<div class="acn">{cosa} <span class="tag">{migl}% di errore in meno</span></div>'
             f'  <div class="acr"><span class="acl">ALISEE</span>'
             f'    <i style="width:{quota:.0f}%;background:#3fb950"></i>'
-            f'    <b>± {it(ali, dec)} {u}</b></div>'
+            f'    <b>{it(ali, dec)} {u}</b></div>'
             f'  <div class="acr"><span class="acl">standard</span>'
             f'    <i style="width:100%;background:#484f58"></i>'
-            f'    <b style="color:#8b949e">± {it(std, dec)} {u}</b></div>'
+            f'    <b style="color:#8b949e">{it(std, dec)} {u}</b></div>'
             f'</div>')
     return righe
 
@@ -389,6 +390,8 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .accs{font-size:11px;color:#6e7681;margin-bottom:12px}
 .acgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 .acn{font-size:11px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.tag{display:inline-block;background:#1b2c20;color:#3fb950;font-size:10px;font-weight:600;
+     padding:1px 7px;border-radius:10px;margin-left:6px;text-transform:none;letter-spacing:0}
 .acr{display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:11px}
 .acl{color:#6e7681;width:48px;flex:none}
 .acr i{display:block;height:7px;border-radius:3px;max-width:110px}
@@ -460,22 +463,22 @@ def build_dashboard(df, wins, embed=False):
     # Precisione: blocco completo sulla dashboard; nel widget del cliente una riga
     # sola (il surfista vuole l'onda, la prova estesa serve alla trattativa).
     if embed:
-        vals = " · ".join(f"{c} ± {f'{a:.{d}f}'.replace('.', ',')} {u}"
-                          for c, a, s, u, d in SKILL)
+        vals = " · ".join(
+            f"{c} {f'{a:.{d}f}'.replace('.', ',')} {u} "
+            f"(standard: {f'{s:.{d}f}'.replace('.', ',')})"
+            for c, a, s, u, d, m in SKILL)
         acc_html = (f'<div class="acc"><div class="accs" style="margin:0">'
-                    f'Precisione verificata su ~{SKILL_ORE} ore contro boa e stazione: '
-                    f'{vals} — sempre più precisa del modello standard.</div></div>')
+                    f'Verificata sul mare vero — errore medio su ~{SKILL_ORE} ore di '
+                    f'confronto con boa e stazione: {vals}.</div></div>')
     else:
         acc_html = f"""<div class="acc">
-  <div class="acch">Quanto è precisa</div>
-  <div class="accs">Scarto medio da quello che gli strumenti misurano davvero, su tutte le
-    condizioni. Barra più corta = più precisa. (Media: circa 2 volte su 3 si sta dentro
-    questo scarto.)</div>
+  <div class="acch">Verificata sul mare vero</div>
+  <div class="accs">Abbiamo confrontato ~{SKILL_ORE} ore di previsioni con quello che la boa
+    e la stazione hanno poi misurato davvero. Qui sotto: di quanto si sbaglia in media.
+    Barra più corta = previsione più fedele.</div>
   <div class="acgrid">{_accuratezza()}</div>
-  <div class="acex">In pratica, misurato: quando ALISEE dice <b>onda 1,5 m</b>, 8 volte su 10
-    il mare sta tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico e nelle
-    card. Sul mare piccolo lo scarto è minore (± 7 cm sotto i 40 cm), sulle mareggiate
-    maggiore (± 32 cm sopra i 2 m).</div>
+  <div class="acex">Un esempio concreto: quando la previsione dice <b>1,5 m</b>, 8 volte su 10
+    il mare misurato è tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
 </div>"""
 
     doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
