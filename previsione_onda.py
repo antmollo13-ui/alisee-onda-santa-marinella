@@ -44,6 +44,12 @@ SKILL = [
 ]
 SKILL_ORE = "13.000"   # ore di confronto totali (onda 4.666 + vento 8.571)
 
+# ── Regole dello spot (dalle schede SurfCamItalia di Santa Marinella:
+#    Banzai "swell da W, SW e NW"; Supertubos "swell ideale da W e SW,
+#    con mare molto grande diventa impegnativo").
+SWELL_SETTORE = (190, 320)   # da SSW a NW: il settore di swell che accende gli spot
+HS_GROSSO     = 2.8          # m: sopra, tecnico/per esperti -> niente piu' "buono"
+
 # Fascia probabile MISURATA (verita_intervalli.py, test 2026): per ogni fascia di
 # valore PREVISTO, dove sta il mare reale 8 volte su 10 (quantili osservati alla
 # boa, NON dedotti dal MAE — il MAE medio sottostima l'incertezza sulle mareggiate).
@@ -94,16 +100,26 @@ def comp_offshore(w_dir):
     return float(np.cos(np.radians(float(w_dir or 0) - DIR_OFFSHORE)))
 
 
-def giudizio(hs, tp, w_kn=0.0, w_dir=0.0):
-    """Qualita' surf: onda (size + periodo) MODULATA dal vento.
-    L'onshore teso rovina anche un'onda formata; l'offshore la pulisce."""
+def _swell_giusto(sw_dir):
+    """True se lo swell arriva dal settore che accende gli spot (W/SW/NW)."""
+    if sw_dir is None or sw_dir != sw_dir:
+        return True                       # direzione ignota: non penalizzare
+    lo, hi = SWELL_SETTORE
+    return lo <= float(sw_dir) % 360 <= hi
+
+
+def giudizio(hs, tp, w_kn=0.0, w_dir=0.0, sw_dir=None):
+    """Qualita' surf: onda (size + periodo + DIREZIONE dello swell) modulata dal
+    vento. "BUONO" richiede tutto insieme: taglia giusta (ne' piccola ne' da
+    esperti), mare formato, swell dal settore giusto, vento amico."""
     if hs < 0.5:  return "piatto"
     if hs < 0.8:  return "piccolo"
     off = comp_offshore(w_dir)
     if w_kn >= 12 and off < -0.3:  return "mosso/corto"   # onshore teso: chop
     if tp < 5:                      return "mosso/corto"   # mare corto da vento
-    if hs >= 1.2 and tp >= 6 and (w_kn < 8 or off > 0.3):
-        return "BUONO"                                     # formata + vento amico
+    if (1.2 <= hs <= HS_GROSSO and tp >= 6 and _swell_giusto(sw_dir)
+            and (w_kn < 8 or off > 0.3)):
+        return "BUONO"
     return "surfabile"
 
 
@@ -152,8 +168,9 @@ def scarica_e_prevedi():
     df = df.merge(dv[["date", "vento_kn", "vento_dir", "vento_icon"]],
                   on="date", how="left")
     df[["vento_kn", "vento_dir"]] = df[["vento_kn", "vento_dir"]].ffill().bfill()
-    df["stato"] = [giudizio(h, t, w, d) for h, t, w, d in
-                   zip(df.hs_alisee, df.tp_alisee, df.vento_kn, df.vento_dir)]
+    df["stato"] = [giudizio(h, t, w, d, s) for h, t, w, d, s in
+                   zip(df.hs_alisee, df.tp_alisee, df.vento_kn, df.vento_dir,
+                       df.wave_direction)]
 
     # ── Alba/tramonto: le ore di buio non si surfano — in grafico si scuriscono
     # e le finestre si calcolano solo sulle ore di luce.
@@ -519,9 +536,9 @@ def build_dashboard(df, wins, embed=False):
   <div class="card">
     <div class="k">prossima finestra surfabile</div>
     {win_html}
-    <div class="mini"><div><div class="l" style="line-height:1.6">Finestra = onda ≥0,8 m
-      nelle ore di luce. "Probabile tra X e Y" = dove il mare reale è stato 8 volte su 10
-      quando la previsione diceva così (misurato alla boa, non stimato).</div></div></div>
+    <div class="mini"><div><div class="l" style="line-height:1.6">"Buono" = onda formata,
+      swell da W/SW e vento amico. Finestre solo nelle ore di luce. "Probabile" = misurato
+      alla boa: 8 volte su 10 il mare sta lì.</div></div></div>
   </div>
 </div>
 
