@@ -341,17 +341,21 @@ def _accuratezza():
         """Numero con la virgola decimale italiana."""
         return f"{v:.{dec}f}".replace(".", ",")
 
+    TRACK = 110                        # px: lunghezza della barra "standard" (=100%)
     righe = ""
     for cosa, ali, std, u, dec, migl in SKILL:
-        quota = ali / std * 100        # barra: il nostro errore rispetto al loro
+        # Larghezze in PX ASSOLUTI: in percentuale, il max-width del CSS le
+        # schiacciava entrambe al tetto e le barre uscivano LUNGHE UGUALI
+        # (bug visivo: "piu' corta = meglio" senza nessuna barra piu' corta).
+        w_ali = TRACK * ali / std
         righe += (
             f'<div class="ac">'
             f'<div class="acn">{cosa} <span class="tag">{migl}% di errore in meno</span></div>'
             f'  <div class="acr"><span class="acl">ALISEE</span>'
-            f'    <i style="width:{quota:.0f}%;background:#3fb950"></i>'
+            f'    <i style="width:{w_ali:.0f}px;background:#3fb950"></i>'
             f'    <b>{it(ali, dec)} {u}</b></div>'
             f'  <div class="acr"><span class="acl">standard</span>'
-            f'    <i style="width:100%;background:#484f58"></i>'
+            f'    <i style="width:{TRACK}px;background:#484f58"></i>'
             f'    <b style="color:#8b949e">{it(std, dec)} {u}</b></div>'
             f'</div>')
     return righe
@@ -415,7 +419,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
      padding:1px 7px;border-radius:10px;margin-left:6px;text-transform:none;letter-spacing:0}
 .acr{display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:11px}
 .acl{color:#6e7681;width:48px;flex:none}
-.acr i{display:block;height:7px;border-radius:3px;max-width:110px}
+.acr i{display:block;height:7px;border-radius:3px;flex:none}
 .acr b{font-size:12px;font-weight:600;white-space:nowrap}
 .acex{margin-top:14px;padding-top:11px;border-top:1px solid #21262d;font-size:12px;color:#8b949e}
 .acex b{color:#e6edf3;font-weight:600}
@@ -495,8 +499,8 @@ def build_dashboard(df, wins, embed=False):
         acc_html = f"""<div class="acc">
   <div class="acch">Verificata sul mare vero</div>
   <div class="accs">Abbiamo confrontato ~{SKILL_ORE} ore di previsioni con quello che la boa
-    e la stazione hanno poi misurato davvero. Qui sotto: di quanto si sbaglia in media.
-    Barra più corta = previsione più fedele.</div>
+    e la stazione hanno poi misurato davvero. La barra mostra l'errore medio: più è corta,
+    meno si sbaglia.</div>
   <div class="acgrid">{_accuratezza()}</div>
   <div class="acex">Un esempio concreto: quando la previsione dice <b>1,5 m</b>, 8 volte su 10
     il mare misurato è tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
