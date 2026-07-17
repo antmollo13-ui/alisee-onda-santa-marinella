@@ -29,19 +29,30 @@ jobs:
       - name: Installa dipendenze
         run: pip install -r requirements.txt
 
-      - name: Genera previsione + dashboard
+      - name: Genera versione pubblica (neutra)
         # Co-branding sulla pagina PUBBLICA: accendere SOLO ad accordo fatto,
-        # aggiungendo qui sotto (senza il cancelletto):
-        #   env:
-        #     PARTNER: SurfCam Italia
+        # aggiungendo qui l'env PARTNER come nello step demo qui sotto.
         run: python previsione_onda.py
 
       - name: Prepara la cartella da pubblicare
         run: |
           mkdir -p site
-          cp dashboard.html site/index.html   # pagina completa (demo / uso interno)
+          cp dashboard.html site/index.html   # pagina pubblica
           cp widget.html    site/widget.html  # widget incorporabile dal cliente
           cp previsione_onda_72h.csv site/ || true
+
+      - name: Genera versione DEMO (tutti i ganci accesi)
+        # Pagina di dimostrazione per la trattativa: non e' linkata da nessuna
+        # parte, la vede solo chi riceve l'URL. Lo sponsor e' un segnaposto
+        # (non si usa il nome di un'azienda reale senza consenso).
+        env:
+          PARTNER: SurfCam Italia
+          CAM_URL: https://surfcamitalia.it/spot/supertubes/
+          SPONSOR: il tuo sponsor qui
+        run: |
+          python previsione_onda.py
+          cp dashboard.html site/demo.html
+          cp widget.html    site/demo-widget.html
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
