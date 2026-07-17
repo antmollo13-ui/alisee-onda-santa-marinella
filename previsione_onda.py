@@ -44,6 +44,13 @@ SKILL = [
 ]
 SKILL_ORE = "13.000"   # ore di confronto totali (onda 4.666 + vento 8.571)
 
+# Fascia probabile MISURATA (verita_intervalli.py, test 2026): per ogni fascia di
+# valore PREVISTO, dove sta il mare reale 8 volte su 10 (quantili osservati alla
+# boa, NON dedotti dal MAE — il MAE medio sottostima l'incertezza sulle mareggiate).
+_BANDA_PRED = [0.20, 0.50, 0.70, 0.90, 1.15, 1.50, 1.95, 2.60]
+_BANDA_P10  = [0.13, 0.32, 0.46, 0.62, 0.83, 1.11, 1.36, 2.01]
+_BANDA_P90  = [0.40, 0.62, 0.83, 1.08, 1.44, 1.78, 2.43, 3.25]
+
 STATI = {  # stato -> (etichetta, colore)
     "piatto":      ("piatto",    "#484f58"),
     "piccolo":     ("piccolo",   "#6e7681"),
@@ -143,12 +150,36 @@ def scarica_e_prevedi():
     df[["vento_kn", "vento_dir"]] = df[["vento_kn", "vento_dir"]].ffill().bfill()
     df["stato"] = [giudizio(h, t, w, d) for h, t, w, d in
                    zip(df.hs_alisee, df.tp_alisee, df.vento_kn, df.vento_dir)]
+
+    # ── Alba/tramonto: le ore di buio non si surfano — in grafico si scuriscono
+    # e le finestre si calcolano solo sulle ore di luce.
+    try:
+        rs = requests.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": LAT_SPOT, "longitude": LON_SPOT,
+            "daily": "sunrise,sunset", "timezone": "Europe/Rome",
+            "forecast_days": 4}, timeout=90).json()["daily"]
+        sole = {pd.Timestamp(t).date(): (pd.Timestamp(a), pd.Timestamp(b))
+                for t, a, b in zip(rs["time"], rs["sunrise"], rs["sunset"])}
+        df["luce"] = [bool(sole.get(t.date()) and
+                           sole[t.date()][0] <= t <= sole[t.date()][1])
+                      for t in df.date]
+    except Exception:
+        df["luce"] = df.date.dt.hour.between(6, 20)   # ripiego prudente
+
+    # ── Fascia probabile per ogni ora (interpolazione dei quantili misurati)
+    df["hs_p10"] = np.minimum(np.interp(df.hs_alisee, _BANDA_PRED, _BANDA_P10),
+                              df.hs_alisee)
+    df["hs_p90"] = np.maximum(np.interp(df.hs_alisee, _BANDA_PRED, _BANDA_P90),
+                              df.hs_alisee)
+
     ora = pd.Timestamp.now().floor("h")
     return df[df.date >= ora].reset_index(drop=True)
 
 
 def finestre(df, soglia=0.8):
-    surf = df[df.hs_alisee >= soglia].copy()
+    """Finestre surfabili DIURNE: onda >= soglia nelle ore di luce. Una finestra
+    alle 3 di notte non serve a nessuno — non va annunciata."""
+    surf = df[(df.hs_alisee >= soglia) & (df.luce)].copy()
     out = []
     if not surf.empty:
         surf["blk"] = (surf["date"].diff() > pd.Timedelta("1h")).cumsum()
@@ -156,7 +187,8 @@ def finestre(df, soglia=0.8):
             imax = g.hs_alisee.idxmax()
             out.append((g.date.min(), g.date.max(), g.loc[imax, "hs_alisee"],
                         g.loc[imax, "tp_alisee"],
-                        onda_cardinale(g.loc[imax, "wave_direction"])))
+                        onda_cardinale(g.loc[imax, "wave_direction"]),
+                        g.loc[imax, "hs_p10"], g.loc[imax, "hs_p90"]))
     return out
 
 
@@ -174,56 +206,94 @@ def _bussola(direzione, size=64):
   </g></svg>"""
 
 
-def _chart(df, W, H, pad, compatto=False):
-    """Grafico Hs 72h: barre per stato + overlay NWP + (se non compatto) frecce dir."""
-    pl, pr, pt, pb = pad
+def _chart(df, W=940):
+    """Grafico 72h su due tracce: ONDA sopra (barre per stato + fascia probabile
+    misurata + linea NWP) e VENTO sotto (barre verdi=amico / ambra=contrario).
+    Le ore di buio sono scurite: di notte non si surfa."""
     n = len(df)
-    hs_max = max(1.0, float(df.hs_alisee.max()) * 1.18)
-    plot_h = H - pt - pb
+    pl, pr, pt = 44, 14, 22
+    h_wave, gap, h_wind, pb = 148, 36, 44, 24
+    H = pt + h_wave + gap + h_wind + pb
     bw = (W - pl - pr) / max(n, 1)
+    hs_max = max(1.0, float(df.hs_p90.max()) * 1.08)
+    wk_max = max(12.0, float(df.vento_kn.max()) * 1.15)
+    y_wave0 = pt + h_wave                     # base traccia onda
+    y_wind0 = pt + h_wave + gap + h_wind      # base traccia vento
 
-    def y_of(v): return pt + plot_h * (1 - v / hs_max)
+    def y_of(v): return pt + h_wave * (1 - v / hs_max)
+    def wy(v):   return y_wind0 - h_wind * (min(v, wk_max) / wk_max)
 
-    fs = 9 if compatto else 11
-    grid = ""
-    step = 0.5 if hs_max <= 2.5 else 1.0
-    v = 0.0
+    # ── Notte: colonne scurite su entrambe le tracce
+    notte, i = "", 0
+    while i < n:
+        if not bool(df.luce.iloc[i]):
+            j = i
+            while j < n and not bool(df.luce.iloc[j]):
+                j += 1
+            x0, x1 = pl + i * bw, pl + j * bw
+            notte += (f'<rect x="{x0:.1f}" y="{pt}" width="{x1-x0:.1f}" '
+                      f'height="{y_wind0-pt:.1f}" fill="#010409" opacity="0.5"/>')
+            i = j
+        else:
+            i += 1
+
+    # ── Griglia
+    grid, step, v = "", (0.5 if hs_max <= 2.5 else 1.0), 0.0
     while v <= hs_max:
         yy = y_of(v)
         grid += (f'<line x1="{pl}" y1="{yy:.1f}" x2="{W-pr}" y2="{yy:.1f}" '
                  f'stroke="#ffffff14" stroke-width="1"/>'
                  f'<text x="{pl-5}" y="{yy+3:.1f}" text-anchor="end" fill="#6e7681" '
-                 f'font-size="{fs}">{v:.1f}</text>')
+                 f'font-size="11">{v:.1f}</text>')
         v += step
+    if wk_max > 10:
+        grid += (f'<line x1="{pl}" y1="{wy(10):.1f}" x2="{W-pr}" y2="{wy(10):.1f}" '
+                 f'stroke="#ffffff10" stroke-width="1"/>'
+                 f'<text x="{pl-5}" y="{wy(10)+3:.1f}" text-anchor="end" fill="#6e7681" '
+                 f'font-size="10">10</text>')
 
-    bars, nwp, daysep, daylab, arrows = "", [], "", "", ""
+    # ── Fascia probabile misurata: area morbida dietro le barre
+    xs  = [pl + (i + 0.5) * bw for i in range(n)]
+    su  = [f"{x:.1f},{y_of(float(p)):.1f}" for x, p in zip(xs, df.hs_p90)]
+    giu = [f"{x:.1f},{y_of(float(p)):.1f}" for x, p in zip(xs, df.hs_p10)]
+    banda = (f'<polygon points="{" ".join(su + giu[::-1])}" fill="#58a6ff" '
+             f'opacity="0.12"/>')
+
+    bars, wbars, nwp, daysep, daylab = "", "", [], "", ""
     last_day = None
     for i, (_, r) in enumerate(df.iterrows()):
         x = pl + i * bw
+        dim = "" if bool(r.luce) else ' fill-opacity="0.5"'
         yb = y_of(float(r.hs_alisee))
-        bars += (f'<rect x="{x+bw*0.1:.1f}" y="{yb:.1f}" width="{bw*0.8:.1f}" '
-                 f'height="{(H-pb)-yb:.1f}" fill="{STATI[r.stato][1]}" rx="1">'
-                 f'<title>{r.date:%d/%m %H:%M} — {r.hs_alisee:.1f} m · '
-                 f'{r.tp_alisee:.0f}s · {onda_cardinale(r.wave_direction)}</title></rect>')
+        bars += (f'<rect x="{x+bw*0.12:.1f}" y="{yb:.1f}" width="{bw*0.76:.1f}" '
+                 f'height="{y_wave0-yb:.1f}" fill="{STATI[r.stato][1]}" rx="1"{dim}>'
+                 f'<title>{r.date:%d/%m %H:%M} — onda {r.hs_alisee:.1f} m '
+                 f'(probabile {r.hs_p10:.1f}–{r.hs_p90:.1f}) · {r.tp_alisee:.0f}s · '
+                 f'vento {r.vento_kn:.0f} kn {onda_cardinale(r.vento_dir)}</title></rect>')
+        _, wcol = _vento_label(float(r.vento_kn), float(r.vento_dir))
+        yw = wy(float(r.vento_kn))
+        wbars += (f'<rect x="{x+bw*0.12:.1f}" y="{yw:.1f}" width="{bw*0.76:.1f}" '
+                  f'height="{y_wind0-yw:.1f}" fill="{wcol}" rx="1"{dim}>'
+                  f'<title>{r.date:%d/%m %H:%M} — vento {r.vento_kn:.0f} kn '
+                  f'{onda_cardinale(r.vento_dir)}</title></rect>')
         nwp.append(f"{x+bw/2:.1f},{y_of(float(r.wave_height)):.1f}")
-        if not compatto and i % 6 == 0:
-            ang = float(r.wave_direction or 0) + 180
-            cx, cy = x + bw / 2, H - pb + 26
-            arrows += (f'<g transform="rotate({ang:.0f} {cx:.1f} {cy:.1f})">'
-                       f'<path d="M{cx:.1f} {cy-5:.1f} L{cx+3:.1f} {cy+4:.1f} '
-                       f'L{cx:.1f} {cy+1.5:.1f} L{cx-3:.1f} {cy+4:.1f} Z" fill="#8b949e"/></g>')
         d = r.date.date()
         if d != last_day:
             if last_day is not None:
-                daysep += (f'<line x1="{x:.1f}" y1="{pt}" x2="{x:.1f}" y2="{H-pb}" '
+                daysep += (f'<line x1="{x:.1f}" y1="{pt}" x2="{x:.1f}" y2="{y_wind0}" '
                            f'stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>')
-            lbl = f"{r.date:%d/%m}" if compatto else f"{gg(r.date)} {r.date:%d/%m}"
-            daylab += (f'<text x="{x+3:.1f}" y="{H-pb+13:.0f}" fill="#8b949e" '
-                       f'font-size="{fs}">{lbl}</text>')
+            daylab += (f'<text x="{x+3:.1f}" y="{y_wind0+16:.0f}" fill="#8b949e" '
+                       f'font-size="11">{gg(r.date)} {r.date:%d/%m}</text>')
             last_day = d
+
     nwp_line = (f'<polyline points="{" ".join(nwp)}" fill="none" stroke="#8b949e" '
                 f'stroke-width="1.2" stroke-dasharray="4 3" opacity="0.65"/>')
-    return f'<svg viewBox="0 0 {W} {H}" width="100%">{grid}{daysep}{bars}{nwp_line}{daylab}{arrows}</svg>'
+    capt = (f'<text x="{pl}" y="{pt-8}" fill="#8b949e" font-size="11">onda (m)</text>'
+            f'<text x="{pl}" y="{y_wind0-h_wind-9}" fill="#8b949e" font-size="11">'
+            f'vento (kn) — <tspan fill="#3fb950">verde: amico</tspan> · '
+            f'<tspan fill="#d29922">ambra: contrario</tspan></text>')
+    return (f'<svg viewBox="0 0 {W} {H}" width="100%">'
+            f'{notte}{grid}{banda}{daysep}{bars}{nwp_line}{wbars}{daylab}{capt}</svg>')
 
 
 def _giorni(df):
@@ -232,7 +302,7 @@ def _giorni(df):
     for d, g in df.groupby(df.date.dt.date):
         imax = g.hs_alisee.idxmax()
         r = g.loc[imax]
-        surf = g[g.hs_alisee >= 0.8]
+        surf = g[(g.hs_alisee >= 0.8) & (g.luce)]        # solo ore di luce
         win = (f"{surf.date.min():%H:%M}–{surf.date.max():%H:%M}"
                if not surf.empty else "—")
         out.append({"data": pd.Timestamp(d), "hs": r.hs_alisee, "tp": r.tp_alisee,
@@ -312,6 +382,8 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .day .h{font-size:22px;font-weight:600}
 .day .w{font-size:12px;color:#6e7681;margin-top:4px}
 .foot{font-size:11px;color:#6e7681;border-top:1px solid #21262d;padding-top:12px;line-height:1.6}
+.brand{margin-top:10px;font-size:12px;color:#6e7681}
+.brand b{color:#58a6ff;letter-spacing:.03em}
 .acc{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
 .acch{font-size:13px;font-weight:600;margin-bottom:3px}
 .accs{font-size:11px;color:#6e7681;margin-bottom:12px}
@@ -351,12 +423,13 @@ def build_dashboard(df, wins, embed=False):
     v_lbl, v_col = _vento_label(float(now.vento_kn), float(now.vento_dir))
 
     if wins:
-        a, b, hs, tp, dr = wins[0]
+        a, b, hs, tp, dr, w10, w90 = wins[0]
         win_html = (f'<div class="big">{hs:.1f} m</div>'
-                    f'<div class="sub">{gg(a)} {a:%d} · {a:%H:%M}–{b:%H:%M} · {tp:.0f}s {dr}</div>')
+                    f'<div class="sub">{gg(a)} {a:%d} · {a:%H:%M}–{b:%H:%M} · {tp:.0f}s {dr}'
+                    f'<br>probabile tra {w10:.1f} e {w90:.1f} m</div>')
     else:
         win_html = ('<div class="big" style="color:#6e7681">—</div>'
-                    '<div class="sub">nessuna onda ≥0,8 m nelle 72h</div>')
+                    '<div class="sub">nessuna onda ≥0,8 m nelle ore di luce delle prossime 72h</div>')
 
     giorni = "".join(
         f'<div class="card day"><div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
@@ -366,7 +439,7 @@ def build_dashboard(df, wins, embed=False):
         f'{g["vdir"]} · finestra {g["win"]}</div></div>'
         for g in _giorni(df))
 
-    chart = _chart(df, 940, 250, (44, 14, 20, 52))
+    chart = _chart(df)
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
@@ -383,6 +456,27 @@ def build_dashboard(df, wins, embed=False):
              f'<div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} '
              f'{ultima:%d/%m %H:%M}</b> (ora italiana){pross_txt} · boa RON Civitavecchia'
              f' · previsione 72h</div>')
+
+    # Precisione: blocco completo sulla dashboard; nel widget del cliente una riga
+    # sola (il surfista vuole l'onda, la prova estesa serve alla trattativa).
+    if embed:
+        vals = " · ".join(f"{c} ± {f'{a:.{d}f}'.replace('.', ',')} {u}"
+                          for c, a, s, u, d in SKILL)
+        acc_html = (f'<div class="acc"><div class="accs" style="margin:0">'
+                    f'Precisione verificata su ~{SKILL_ORE} ore contro boa e stazione: '
+                    f'{vals} — sempre più precisa del modello standard.</div></div>')
+    else:
+        acc_html = f"""<div class="acc">
+  <div class="acch">Quanto è precisa</div>
+  <div class="accs">Scarto medio da quello che gli strumenti misurano davvero, su tutte le
+    condizioni. Barra più corta = più precisa. (Media: circa 2 volte su 3 si sta dentro
+    questo scarto.)</div>
+  <div class="acgrid">{_accuratezza()}</div>
+  <div class="acex">In pratica, misurato: quando ALISEE dice <b>onda 1,5 m</b>, 8 volte su 10
+    il mare sta tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico e nelle
+    card. Sul mare piccolo lo scarto è minore (± 7 cm sotto i 40 cm), sulle mareggiate
+    maggiore (± 32 cm sopra i 2 m).</div>
+</div>"""
 
     doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -411,38 +505,31 @@ def build_dashboard(df, wins, embed=False):
       <div><div class="v">{sst_txt}</div><div class="l">acqua</div></div>
       <div><div class="v">{swp:.0f}%</div><div class="l">mare lungo</div>
         <div class="bar"><i style="width:{swp:.0f}%"></i></div></div>
-      <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">picco · {gg(pk.date)} {pk.date:%H}h</div></div>
+      <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">picco · {gg(pk.date)} {pk.date:%H}h
+        · prob. {pk.hs_p10:.1f}–{pk.hs_p90:.1f}</div></div>
     </div>
   </div>
   <div class="card">
     <div class="k">prossima finestra surfabile</div>
     {win_html}
-    <div class="mini"><div><div class="l" style="line-height:1.6">Finestra = onda ≥0,8 m.
-      Il colore delle barre combina altezza e periodo: mare lungo e formato = buono,
-      corto e disordinato = mosso.</div></div></div>
+    <div class="mini"><div><div class="l" style="line-height:1.6">Finestra = onda ≥0,8 m
+      nelle ore di luce. "Probabile tra X e Y" = dove il mare reale è stato 8 volte su 10
+      quando la previsione diceva così (misurato alla boa, non stimato).</div></div></div>
   </div>
 </div>
 
 <div class="chart">
-  <div class="ct"><span>altezza onda · prossime 72 ore</span>
-    <span>— — modello standard &nbsp;|&nbsp; ▲ direzione</span></div>
+  <div class="ct"><span>onda e vento · prossime 72 ore</span>
+    <span>— — modello standard</span></div>
   {chart}
-  <div class="legend">{_legenda()}</div>
+  <div class="legend">{_legenda()}
+    <span class="lg"><i style="background:#58a6ff;opacity:.3"></i>fascia probabile (8 su 10)</span>
+    <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span></div>
 </div>
 
 <div class="days">{giorni}</div>
 
-<div class="acc">
-  <div class="acch">Quanto è precisa</div>
-  <div class="accs">Scarto medio da quello che gli strumenti misurano davvero, su tutte le
-    condizioni. Barra più corta = più precisa. (Media: circa 2 volte su 3 si sta dentro
-    questo scarto.)</div>
-  <div class="acgrid">{_accuratezza()}</div>
-  <div class="acex">In pratica, misurato: quando ALISEE dice <b>onda 1,5 m</b>, 8 volte su 10
-    il mare sta tra <b>1,1 e 1,8 m</b>. Sul mare piccolo lo scarto è minore (± 7 cm sotto i
-    40 cm), sulle mareggiate maggiore (± 32 cm sopra i 2 m): i numeri qui sopra sono la media
-    di tutte le condizioni.</div>
-</div>
+{acc_html}
 
 <div class="foot">
   Misurato su ~{SKILL_ORE} ore di confronto con la <b>boa ondametrica RON</b> (onda) e la
@@ -451,6 +538,7 @@ def build_dashboard(df, wins, embed=False):
   partono i siti di previsione. I valori sono l'errore sull'analisi: su una previsione a 72 ore
   di anticipo entrambi sbagliano di più.
 </div>
+<div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali</div>
 </div></body></html>"""
     nome = "widget.html" if embed else "dashboard.html"
     with open(os.path.join(BASE, nome), "w", encoding="utf-8") as f:
@@ -468,16 +556,17 @@ if __name__ == "__main__":
     for _, r in df.iloc[::2].iterrows():
         print(f"{r['date']:%a %d/%m %H:%M} {r.hs_alisee:5.2f} m {r.tp_alisee:5.1f}s "
               f"{onda_cardinale(r.wave_direction):>5s}  {r.stato}")
-    print("\n--- FINESTRE (Hs>=0.8m) ---")
+    print("\n--- FINESTRE DIURNE (Hs>=0.8m, ore di luce) ---")
     if wins:
-        for a, b, hs, tp, d in wins:
-            print(f"  {a:%a %d/%m %H:%M} -> {b:%H:%M}  fino a {hs:.1f}m {tp:.0f}s {d}")
+        for a, b, hs, tp, d, p10, p90 in wins:
+            print(f"  {a:%a %d/%m %H:%M} -> {b:%H:%M}  fino a {hs:.1f}m "
+                  f"(prob {p10:.1f}-{p90:.1f}) {tp:.0f}s {d}")
     else:
         print("  nessuna nelle prossime 72h")
 
-    df[["date", "hs_alisee", "tp_alisee", "wave_direction", "wave_height",
-        "swell_pct", "stato"]].to_csv(os.path.join(BASE, "previsione_onda_72h.csv"),
-                                      index=False)
+    df[["date", "hs_alisee", "hs_p10", "hs_p90", "tp_alisee", "wave_direction",
+        "wave_height", "swell_pct", "vento_kn", "vento_dir", "luce", "stato"]] \
+        .to_csv(os.path.join(BASE, "previsione_onda_72h.csv"), index=False)
     build_dashboard(df, wins)                  # dashboard.html — pagina completa
     build_dashboard(df, wins, embed=True)      # widget.html — stessa pagina, per iframe
     print("\nprevisione_onda_72h.csv + dashboard.html + widget.html aggiornati.")
