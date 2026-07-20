@@ -307,8 +307,18 @@ JS_CHART = r"""
 (function(){
 const D=__DATA__, CRON=__CRON__;
 const svg=document.getElementById('ch'); if(!svg||!D.length) return;
-const W=940, PL=46, PR=14, PT=24, HW=170, GAP=42, HK=44, PB=26;
-const H=PT+HW+GAP+HK+PB; svg.setAttribute('viewBox','0 0 '+W+' '+H);
+const $=id=>document.getElementById(id);
+const fmt=v=>v.toFixed(1).replace('.',',');
+function render(){
+svg.innerHTML='';
+const cw=Math.max(320,Math.round(svg.getBoundingClientRect().width)
+  ||((svg.parentElement&&svg.parentElement.clientWidth)||940));
+const mob=cw<560;
+const W=cw, PL=mob?32:46, PR=mob?6:14, PT=22, HW=mob?140:170,
+      GAP=mob?34:42, HK=mob?34:44, PB=mob?22:26;
+const H=PT+HW+GAP+HK+PB;
+svg.setAttribute('viewBox','0 0 '+W+' '+H);
+svg.style.height=H+'px';
 const n=D.length, bw=(W-PL-PR)/n;
 const hsMax=Math.max(1, Math.max.apply(null,D.map(d=>d.b))*1.08);
 const kMax=Math.max(12, Math.max.apply(null,D.map(d=>d.k))*1.15);
@@ -318,14 +328,16 @@ const E=(t,a)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',t)
   for(const k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;};
 let i0=0;while(i0<n){if(!D[i0].l){let j=i0;while(j<n&&!D[j].l)j++;
   E('rect',{x:PL+i0*bw,y:PT,width:(j-i0)*bw,height:yk0-PT,fill:'#010409',opacity:.5});i0=j;}else i0++;}
+const fs=mob?10:11;
 const step=hsMax<=2.5?0.5:1;
 for(let v=0;v<=hsMax;v+=step){E('line',{x1:PL,y1:YH(v),x2:W-PR,y2:YH(v),stroke:'#ffffff14'});
-  const t=E('text',{x:PL-6,y:YH(v)+3,'text-anchor':'end',fill:'#6e7681','font-size':11});t.textContent=v.toFixed(1);}
+  const t=E('text',{x:PL-5,y:YH(v)+3,'text-anchor':'end',fill:'#6e7681','font-size':fs});t.textContent=v.toFixed(1);}
 if(kMax>10){E('line',{x1:PL,y1:YK(10),x2:W-PR,y2:YK(10),stroke:'#ffffff10'});
-  const t=E('text',{x:PL-6,y:YK(10)+3,'text-anchor':'end',fill:'#6e7681','font-size':10});t.textContent='10';}
+  const t=E('text',{x:PL-5,y:YK(10)+3,'text-anchor':'end',fill:'#6e7681','font-size':fs-1});t.textContent='10';}
 const days=[];D.forEach((d,i)=>{if(!days.length||days[days.length-1].dm!==d.dm)days.push({dm:d.dm,gg:d.gg,i:i});});
 days.forEach((d,k)=>{if(k>0)E('line',{x1:PL+d.i*bw,y1:PT,x2:PL+d.i*bw,y2:yk0,stroke:'#30363d','stroke-dasharray':'3 3'});
-  const t=E('text',{x:PL+d.i*bw+4,y:yk0+16,fill:'#8b949e','font-size':11});t.textContent=d.gg+' '+d.dm;});
+  const t=E('text',{x:PL+d.i*bw+3,y:yk0+15,fill:'#8b949e','font-size':fs});
+  t.textContent=mob?(d.gg+' '+d.dm.slice(0,2)):(d.gg+' '+d.dm);});
 const defs=document.createElementNS(svg.namespaceURI,'defs');
 defs.innerHTML='<linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">'
  +'<stop offset="0" stop-color="#58a6ff" stop-opacity="0.35"/>'
@@ -344,15 +356,13 @@ E('path',{d:bd+'Z',fill:'#58a6ff',opacity:.13});
 E('path',{d:spline(pH)+'L'+X(n-1).toFixed(1)+' '+YH(0).toFixed(1)+'L'+X(0).toFixed(1)+' '+YH(0).toFixed(1)+'Z',fill:'url(#ga)'});
 E('path',{d:spline(pN),fill:'none',stroke:'#8b949e','stroke-width':1.2,'stroke-dasharray':'4 3',opacity:.6});
 E('path',{d:spline(pH),fill:'none',stroke:'#58a6ff','stroke-width':2});
-D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:PT+HW+10,width:bw+0.5,height:6,fill:d.sc,opacity:d.l?1:.45});});
+D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:PT+HW+9,width:bw+0.5,height:6,fill:d.sc,opacity:d.l?1:.45});});
 D.forEach((d,i)=>{E('rect',{x:PL+i*bw+bw*0.15,y:YK(d.k),width:bw*0.7,height:yk0-YK(d.k),rx:1,
   fill:d.wc,'fill-opacity':d.l?1:.5});});
-let c1=E('text',{x:PL,y:PT-9,fill:'#8b949e','font-size':11});c1.textContent='onda (m)';
-let c2=E('text',{x:PL,y:yk0-HK-8,fill:'#8b949e','font-size':11});c2.textContent='vento (kn)';
+let c1=E('text',{x:PL,y:PT-8,fill:'#8b949e','font-size':fs});c1.textContent='onda (m)';
+let c2=E('text',{x:PL,y:yk0-HK-7,fill:'#8b949e','font-size':fs});c2.textContent='vento (kn)';
 const cl=E('line',{y1:PT,y2:yk0,stroke:'#e6edf3','stroke-width':1,opacity:0,'stroke-dasharray':'2 3'});
 const cd=E('circle',{r:4.5,fill:'#58a6ff',stroke:'#0d1117','stroke-width':2,opacity:0});
-const fmt=v=>v.toFixed(1).replace('.',',');
-const $=id=>document.getElementById(id);
 function setRO(i,active){const d=D[i];
  if($('ro-when'))$('ro-when').textContent=active?(d.gg+' '+d.dm+' · '+d.hh):'adesso';
  if($('ro-hs'))$('ro-hs').textContent=fmt(d.h);
@@ -370,20 +380,25 @@ function setRO(i,active){const d=D[i];
 function idx(e){const r=svg.getBoundingClientRect();
  const px=(e.clientX-r.left)*W/r.width;
  return Math.max(0,Math.min(n-1,Math.round((px-PL)/bw-0.5)));}
-svg.addEventListener('pointermove',e=>setRO(idx(e),true));
-svg.addEventListener('pointerdown',e=>setRO(idx(e),true));
-svg.addEventListener('pointerleave',()=>setRO(0,false));
+svg.onpointermove=e=>setRO(idx(e),true);
+svg.onpointerdown=e=>setRO(idx(e),true);
+svg.onpointerleave=()=>setRO(0,false);
 const dp=$('dayps');
-if(dp)days.forEach(d=>{const b=document.createElement('button');b.className='dayp';
+if(dp){dp.innerHTML='';days.forEach(d=>{const b=document.createElement('button');b.className='dayp';
  b.textContent=d.gg+' '+d.dm;
- b.onclick=()=>setRO(Math.min(n-1,d.i+12),true);dp.appendChild(b);});
+ b.onclick=()=>setRO(Math.min(n-1,d.i+12),true);dp.appendChild(b);});}
+setRO(0,false);
+}
+render();
+let rT;window.addEventListener('resize',()=>{clearTimeout(rT);rT=setTimeout(render,150);});
+if(window.ResizeObserver)new ResizeObserver(()=>{clearTimeout(rT);rT=setTimeout(render,150);})
+  .observe(svg.parentElement);
 function cnt(){const now=new Date();let best=null;
  for(let g=0;g<2;g++)CRON.forEach(h=>{const t=new Date(Date.UTC(now.getUTCFullYear(),
   now.getUTCMonth(),now.getUTCDate()+g,h,0,0));if(t>now&&(!best||t<best))best=t;});
  if(!best)return;const m=Math.round((best-now)/60000);const el=$('cnt');
  if(el)el.textContent='si aggiorna tra '+(m>=60?Math.floor(m/60)+'h '+(m%60)+'m':m+' min');}
 cnt();setInterval(cnt,30000);
-setRO(0,false);
 })();
 """
 
@@ -516,6 +531,22 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .acex b{color:#e6edf3;font-weight:600}
 @media(max-width:720px){.acgrid{grid-template-columns:1fr}}
 @media(max-width:720px){.hero,.days{grid-template-columns:1fr}}
+@media(max-width:640px){
+ body{padding:12px}
+ h1{font-size:16px}
+ .hs{font-size:32px}
+ .card{padding:12px 14px}
+ .now{gap:12px}
+ .mini{flex-wrap:wrap;gap:8px}
+ .mini div{flex:1 1 42%}
+ .hero{gap:10px;margin-bottom:10px}
+ .days{gap:8px;margin-bottom:10px}
+ .chart{padding:10px 8px 6px;margin-bottom:10px}
+ .top{margin-bottom:12px}
+ .upd{font-size:11px}
+ .hint{display:none}
+ .acc{padding:12px 14px}
+}
 """
 
 
