@@ -40,6 +40,20 @@ PARTNER = os.environ.get("PARTNER", "").strip()
 #              ai supporter locali = linea di ricavo nuova.
 CAM_URL = os.environ.get("CAM_URL", "").strip()
 SPONSOR = os.environ.get("SPONSOR", "").strip()
+#   PREMIUM_URL -> pagina abbonamento della piattaforma: e' il bersaglio del
+#                  widget FREEMIUM (widget-free.html), dove la previsione
+#                  completa sta dietro il loro Premium = il forecast diventa
+#                  un motivo per abbonarsi, cioe' un asset di guadagno.
+PREMIUM_URL = os.environ.get("PREMIUM_URL", "").strip()
+
+
+def _utm(url):
+    """Aggiunge il tracciamento: ogni click dal widget e' attribuibile ad ALISEE.
+    E' la prova, nei LORO analytics, di quanto il widget converte."""
+    if not url:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}utm_source=alisee&utm_medium=widget"
 
 # Skill validata OOS in UNITA' REALI (non percentuali astratte).
 # Fonte: alisee_onda.py (test 2026, 4.666 ore) e alisee_vento.py (test 2025, 8.571 ore),
@@ -451,6 +465,10 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .cta:hover{background:#2ea043}
 .spons{color:#6e7681}
 .spons b{color:#e6edf3}
+.lock{background:#161b22;border:1px dashed #30363d;border-radius:12px;padding:22px 18px;
+      text-align:center;margin-bottom:14px}
+.lock-t{font-size:15px;font-weight:600}
+.lock-s{font-size:12px;color:#8b949e;margin-top:5px;margin-bottom:4px}
 .acc{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
 .acch{font-size:13px;font-weight:600;margin-bottom:3px}
 .accs{font-size:11px;color:#6e7681;margin-bottom:12px}
@@ -479,10 +497,13 @@ def _vento_label(w_kn, w_dir):
     return "laterale", "#8b949e"
 
 
-def build_dashboard(df, wins, embed=False):
+def build_dashboard(df, wins, embed=False, gate=False):
     """Genera la pagina. embed=False -> dashboard.html (pagina completa).
-    embed=True -> widget.html: STESSA pagina (e' quella che funziona), ma
-    trasparente e senza cornice, pronta per l'iframe sul sito del cliente."""
+    embed=True -> widget.html: stessa pagina, trasparente, per l'iframe.
+    gate=True  -> widget-free.html: versione FREEMIUM per gli utenti gratuiti.
+        Mostra solo le prime 24h; dice CHE esiste una finestra (e quanto e'
+        grande il picco) ma NON quando: giorno e orario stanno dietro il
+        Premium della piattaforma. Il forecast diventa merce loro."""
     # 72h piene per grafico/card; i giorni 4-5 diventano la "tendenza"
     t0 = df.date.iloc[0]
     df72  = df[df.date <  t0 + pd.Timedelta("72h")]
@@ -497,8 +518,18 @@ def build_dashboard(df, wins, embed=False):
     sst_txt = f"{sst:.0f}°" if sst == sst else "—"
     swp = float(now.swell_pct)
     v_lbl, v_col = _vento_label(float(now.vento_kn), float(now.vento_dir))
+    # Nel free si vede QUANTO fara' (il picco), ma non QUANDO: quello e' premium.
+    pk_l = ("picco 5 giorni · quando? con Premium" if gate else
+            f"picco · {gg(pk.date)} {pk.date:%H}h · prob. {pk.hs_p10:.1f}–{pk.hs_p90:.1f}")
 
-    if wins:
+    if gate and wins:
+        # L'esca: l'utente gratuito sa che la finestra ESISTE e quanto e' grande,
+        # ma giorno e orario sono il prodotto premium della piattaforma.
+        hs = wins[0][2]
+        win_html = (f'<div class="big">{hs:.1f} m in arrivo</div>'
+                    f'<div class="sub">c\'è una finestra surfabile nei prossimi 3 giorni'
+                    f' — giorno e orario riservati agli abbonati</div>')
+    elif wins:
         a, b, hs, tp, dr, w10, w90 = wins[0]
         win_html = (f'<div class="big">{hs:.1f} m</div>'
                     f'<div class="sub">{gg(a)} {a:%d} · {a:%H:%M}–{b:%H:%M} · {tp:.0f}s {dr}'
@@ -527,11 +558,24 @@ def build_dashboard(df, wins, embed=False):
                     f'<span>· a 4-5 giorni l\'affidabilità cala, ricontrolla domani</span></div>')
 
     # Gancio al prodotto premium della piattaforma: il momento buono -> la cam
-    cta = (f'<a class="cta" href="{CAM_URL}">Guarda la cam live →</a>' if CAM_URL else "")
+    cta = (f'<a class="cta" href="{_utm(CAM_URL)}">Guarda la cam live →</a>' if CAM_URL else "")
     spons = (f' <span class="spons">· previsione offerta da <b>{SPONSOR}</b></span>'
              if SPONSOR else "")
 
-    chart = _chart(df72)
+    # Freemium: le 24h si vedono, il resto e' il prodotto che la piattaforma vende
+    if gate:
+        chart = _chart(df72[df72.date < t0 + pd.Timedelta("24h")])
+        titolo_chart = "onda e vento · prossime 24 ore"
+        sblocca = (f'<a class="cta" href="{_utm(PREMIUM_URL)}">Sblocca con Premium →</a>'
+                   if PREMIUM_URL else "")
+        centro = (f'<div class="lock"><div class="lock-t">Previsione completa a 5 giorni</div>'
+                  f'<div class="lock-s">ora per ora · finestre surfabili con giorno e orario · '
+                  f'fascia probabile misurata alla boa</div>{sblocca}</div>')
+        cta = ""                        # nel free l'unico bottone e' lo sblocco
+    else:
+        chart = _chart(df72)
+        titolo_chart = "onda e vento · prossime 72 ore"
+        centro = f'<div class="days">{giorni}</div>\n{tnd_html}'
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
@@ -594,8 +638,7 @@ def build_dashboard(df, wins, embed=False):
       <div><div class="v">{sst_txt}</div><div class="l">acqua</div></div>
       <div><div class="v">{swp:.0f}%</div><div class="l">mare lungo</div>
         <div class="bar"><i style="width:{swp:.0f}%"></i></div></div>
-      <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">picco · {gg(pk.date)} {pk.date:%H}h
-        · prob. {pk.hs_p10:.1f}–{pk.hs_p90:.1f}</div></div>
+      <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">{pk_l}</div></div>
     </div>
   </div>
   <div class="card">
@@ -609,7 +652,7 @@ def build_dashboard(df, wins, embed=False):
 </div>
 
 <div class="chart">
-  <div class="ct"><span>onda e vento · prossime 72 ore</span>
+  <div class="ct"><span>{titolo_chart}</span>
     <span>— — modello standard</span></div>
   {chart}
   <div class="legend">{_legenda()}
@@ -617,8 +660,7 @@ def build_dashboard(df, wins, embed=False):
     <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span></div>
 </div>
 
-<div class="days">{giorni}</div>
-{tnd_html}
+{centro}
 
 {acc_html}
 
@@ -631,7 +673,8 @@ def build_dashboard(df, wins, embed=False):
 </div>
 <div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali{spons}</div>
 </div></body></html>"""
-    nome = "widget.html" if embed else "dashboard.html"
+    nome = ("widget-free.html" if gate else
+            "widget.html" if embed else "dashboard.html")
     with open(os.path.join(BASE, nome), "w", encoding="utf-8") as f:
         f.write(doc)
 
@@ -660,6 +703,7 @@ if __name__ == "__main__":
         "wave_height", "swell_pct", "vento_kn", "vento_dir", "luce", "stato"]] \
         .to_csv(os.path.join(BASE, "previsione_onda_72h.csv"), index=False)
     archivia_previsioni(df)
-    build_dashboard(df, wins)                  # dashboard.html — pagina completa
-    build_dashboard(df, wins, embed=True)      # widget.html — stessa pagina, per iframe
-    print("\nprevisione_onda_72h.csv + dashboard.html + widget.html aggiornati.")
+    build_dashboard(df, wins)                        # dashboard.html — completa
+    build_dashboard(df, wins, embed=True)            # widget.html — per abbonati
+    build_dashboard(df, wins, embed=True, gate=True) # widget-free.html — esca freemium
+    print("\nprevisione_onda_72h.csv + dashboard + widget + widget-free aggiornati.")
