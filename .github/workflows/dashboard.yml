@@ -9,7 +9,7 @@ on:
   workflow_dispatch: {}          # bottone "Run workflow" manuale
 
 permissions:
-  contents: read
+  contents: write        # per ricommittare archivio_previsioni.csv a ogni run
   pages: write
   id-token: write
 
@@ -49,10 +49,21 @@ jobs:
           PARTNER: SurfCam Italia
           CAM_URL: https://surfcamitalia.it/spot/supertubes/
           SPONSOR: il tuo sponsor qui
+          NO_ARCHIVIO: "1"    # la demo non archivia: sarebbe un doppione
         run: |
           python previsione_onda.py
           cp dashboard.html site/demo.html
           cp widget.html    site/demo-widget.html
+
+      - name: Salva archivio previsioni nel repo
+        # Il runner e' usa-e-getta: senza commit, l'archivio sparirebbe a ogni run.
+        run: |
+          git config user.name  "alisee-bot"
+          git config user.email "bot@alisee.local"
+          git pull --rebase origin main || true
+          git add archivio_previsioni.csv
+          git commit -m "archivio previsioni (run automatica)" || echo "niente di nuovo"
+          git push || echo "push archivio saltato"
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

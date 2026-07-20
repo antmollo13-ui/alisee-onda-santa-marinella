@@ -207,6 +207,28 @@ def scarica_e_prevedi():
     return df[df.date >= ora].reset_index(drop=True)
 
 
+def archivia_previsioni(df):
+    """Scrive le previsioni di QUESTA run nell'archivio (run_time, target_time,
+    lead_h, valori ALISEE + NWP grezzo come benchmark). E' la meta' "promesse"
+    del confronto con la verita': senza archivio niente pagella reale.
+    Sul cloud l'archivio viene ricommittato nel repo a ogni run."""
+    if os.environ.get("NO_ARCHIVIO"):
+        return                          # la run demo non archivia (sarebbe un doppione)
+    run_ts = datetime.datetime.now(ROMA).replace(tzinfo=None, second=0, microsecond=0)
+    rows = df.copy()
+    rows["run_time"] = run_ts
+    rows["lead_h"] = ((rows["date"] - run_ts).dt.total_seconds() / 3600).round(1)
+    rows = rows[rows["lead_h"] >= 0]
+    out = rows[["run_time", "date", "lead_h", "hs_alisee", "tp_alisee",
+                "wave_height", "vento_kn", "vento_icon", "vento_dir",
+                "wave_direction"]].rename(columns={"date": "target_time",
+                                                   "wave_height": "hs_nwp"})
+    p = os.path.join(BASE, "archivio_previsioni.csv")
+    out.round(2).to_csv(p, mode="a", header=not os.path.isfile(p), index=False)
+    log_n = len(out)
+    print(f"[ARCHIVIO] +{log_n} previsioni archiviate (lead 0-{out.lead_h.max():.0f}h)")
+
+
 def finestre(df, soglia=0.8):
     """Finestre surfabili DIURNE: onda >= soglia nelle ore di luce. Una finestra
     alle 3 di notte non serve a nessuno — non va annunciata."""
@@ -637,6 +659,7 @@ if __name__ == "__main__":
     df[["date", "hs_alisee", "hs_p10", "hs_p90", "tp_alisee", "wave_direction",
         "wave_height", "swell_pct", "vento_kn", "vento_dir", "luce", "stato"]] \
         .to_csv(os.path.join(BASE, "previsione_onda_72h.csv"), index=False)
+    archivia_previsioni(df)
     build_dashboard(df, wins)                  # dashboard.html — pagina completa
     build_dashboard(df, wins, embed=True)      # widget.html — stessa pagina, per iframe
     print("\nprevisione_onda_72h.csv + dashboard.html + widget.html aggiornati.")

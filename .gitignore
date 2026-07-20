@@ -20,3 +20,7 @@
 !.github/
 !.github/workflows/
 !.github/workflows/dashboard.yml
+
+# Archivio previsioni: la meta' "promesse" della pagella reale (il workflow
+# lo ricommitta a ogni run)
+!archivio_previsioni.csv
