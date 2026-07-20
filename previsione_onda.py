@@ -7,7 +7,7 @@ punto spot per il vento), applica la calibrazione e RIGENERA a ogni run:
                      sul sito del cliente (una miniatura compressa faceva schifo:
                      il cliente incorpora la pagina buona, non una versione ridotta)
 """
-import os, pickle, datetime
+import os, json, pickle, datetime
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
@@ -259,108 +259,133 @@ def finestre(df, soglia=0.8):
     return out
 
 
-def _bussola(direzione, size=64):
-    """Rosa con freccia nel verso di propagazione (l'onda VIENE da `direzione`)."""
+def _bussola(direzione, size=64, arrow_id=""):
+    """Rosa con freccia nel verso di propagazione (l'onda VIENE da `direzione`).
+    Con arrow_id la freccia diventa pilotabile dal JS (ruota durante lo scrub)."""
     d = float(direzione or 0)
+    aid = f' id="{arrow_id}"' if arrow_id else ""
     return f"""<svg viewBox="0 0 64 64" width="{size}" height="{size}">
   <circle cx="32" cy="32" r="27" fill="none" stroke="#30363d" stroke-width="1"/>
   <text x="32" y="10" text-anchor="middle" fill="#6e7681" font-size="8">N</text>
   <text x="32" y="60" text-anchor="middle" fill="#6e7681" font-size="8">S</text>
   <text x="58" y="35" text-anchor="middle" fill="#6e7681" font-size="8">E</text>
   <text x="6"  y="35" text-anchor="middle" fill="#6e7681" font-size="8">O</text>
-  <g transform="rotate({d + 180:.0f} 32 32)">
+  <g{aid} transform="rotate({d + 180:.0f} 32 32)">
     <path d="M32 14 L38 42 L32 36 L26 42 Z" fill="#58a6ff"/>
   </g></svg>"""
 
 
-def _chart(df, W=940):
-    """Grafico 72h su due tracce: ONDA sopra (barre per stato + fascia probabile
-    misurata + linea NWP) e VENTO sotto (barre verdi=amico / ambra=contrario).
-    Le ore di buio sono scurite: di notte non si surfa."""
-    n = len(df)
-    pl, pr, pt = 44, 14, 22
-    h_wave, gap, h_wind, pb = 148, 36, 44, 24
-    H = pt + h_wave + gap + h_wind + pb
-    bw = (W - pl - pr) / max(n, 1)
-    hs_max = max(1.0, float(df.hs_p90.max()) * 1.08)
-    wk_max = max(12.0, float(df.vento_kn.max()) * 1.15)
-    y_wave0 = pt + h_wave                     # base traccia onda
-    y_wind0 = pt + h_wave + gap + h_wind      # base traccia vento
-
-    def y_of(v): return pt + h_wave * (1 - v / hs_max)
-    def wy(v):   return y_wind0 - h_wind * (min(v, wk_max) / wk_max)
-
-    # ── Notte: colonne scurite su entrambe le tracce
-    notte, i = "", 0
-    while i < n:
-        if not bool(df.luce.iloc[i]):
-            j = i
-            while j < n and not bool(df.luce.iloc[j]):
-                j += 1
-            x0, x1 = pl + i * bw, pl + j * bw
-            notte += (f'<rect x="{x0:.1f}" y="{pt}" width="{x1-x0:.1f}" '
-                      f'height="{y_wind0-pt:.1f}" fill="#010409" opacity="0.5"/>')
-            i = j
-        else:
-            i += 1
-
-    # ── Griglia
-    grid, step, v = "", (0.5 if hs_max <= 2.5 else 1.0), 0.0
-    while v <= hs_max:
-        yy = y_of(v)
-        grid += (f'<line x1="{pl}" y1="{yy:.1f}" x2="{W-pr}" y2="{yy:.1f}" '
-                 f'stroke="#ffffff14" stroke-width="1"/>'
-                 f'<text x="{pl-5}" y="{yy+3:.1f}" text-anchor="end" fill="#6e7681" '
-                 f'font-size="11">{v:.1f}</text>')
-        v += step
-    if wk_max > 10:
-        grid += (f'<line x1="{pl}" y1="{wy(10):.1f}" x2="{W-pr}" y2="{wy(10):.1f}" '
-                 f'stroke="#ffffff10" stroke-width="1"/>'
-                 f'<text x="{pl-5}" y="{wy(10)+3:.1f}" text-anchor="end" fill="#6e7681" '
-                 f'font-size="10">10</text>')
-
-    # ── Fascia probabile misurata: area morbida dietro le barre
-    xs  = [pl + (i + 0.5) * bw for i in range(n)]
-    su  = [f"{x:.1f},{y_of(float(p)):.1f}" for x, p in zip(xs, df.hs_p90)]
-    giu = [f"{x:.1f},{y_of(float(p)):.1f}" for x, p in zip(xs, df.hs_p10)]
-    banda = (f'<polygon points="{" ".join(su + giu[::-1])}" fill="#58a6ff" '
-             f'opacity="0.12"/>')
-
-    bars, wbars, nwp, daysep, daylab = "", "", [], "", ""
-    last_day = None
-    for i, (_, r) in enumerate(df.iterrows()):
-        x = pl + i * bw
-        dim = "" if bool(r.luce) else ' fill-opacity="0.5"'
-        yb = y_of(float(r.hs_alisee))
-        bars += (f'<rect x="{x+bw*0.12:.1f}" y="{yb:.1f}" width="{bw*0.76:.1f}" '
-                 f'height="{y_wave0-yb:.1f}" fill="{STATI[r.stato][1]}" rx="1"{dim}>'
-                 f'<title>{r.date:%d/%m %H:%M} — onda {r.hs_alisee:.1f} m '
-                 f'(probabile {r.hs_p10:.1f}–{r.hs_p90:.1f}) · {r.tp_alisee:.0f}s · '
-                 f'vento {r.vento_kn:.0f} kn {onda_cardinale(r.vento_dir)}</title></rect>')
+def _dati_json(df):
+    """Serializza le ore per il grafico interattivo (colori gia' risolti qui,
+    cosi' il JS non deve conoscere le regole dello spot)."""
+    out = []
+    for _, r in df.iterrows():
+        lab, col = STATI[r.stato]
         _, wcol = _vento_label(float(r.vento_kn), float(r.vento_dir))
-        yw = wy(float(r.vento_kn))
-        wbars += (f'<rect x="{x+bw*0.12:.1f}" y="{yw:.1f}" width="{bw*0.76:.1f}" '
-                  f'height="{y_wind0-yw:.1f}" fill="{wcol}" rx="1"{dim}>'
-                  f'<title>{r.date:%d/%m %H:%M} — vento {r.vento_kn:.0f} kn '
-                  f'{onda_cardinale(r.vento_dir)}</title></rect>')
-        nwp.append(f"{x+bw/2:.1f},{y_of(float(r.wave_height)):.1f}")
-        d = r.date.date()
-        if d != last_day:
-            if last_day is not None:
-                daysep += (f'<line x1="{x:.1f}" y1="{pt}" x2="{x:.1f}" y2="{y_wind0}" '
-                           f'stroke="#30363d" stroke-width="1" stroke-dasharray="3 3"/>')
-            daylab += (f'<text x="{x+3:.1f}" y="{y_wind0+16:.0f}" fill="#8b949e" '
-                       f'font-size="11">{gg(r.date)} {r.date:%d/%m}</text>')
-            last_day = d
+        sst = float(r.get("sea_surface_temperature", float("nan")))
+        out.append({
+            "gg": gg(r.date), "dm": f"{r.date:%d/%m}", "hh": f"{r.date:%H:%M}",
+            "h": round(float(r.hs_alisee), 2), "a": round(float(r.hs_p10), 2),
+            "b": round(float(r.hs_p90), 2), "p": round(float(r.tp_alisee), 1),
+            "nw": round(float(r.wave_height), 2),
+            "wd": round(float(r.wave_direction or 0)),
+            "wdc": onda_cardinale(r.wave_direction),
+            "k": round(float(r.vento_kn), 1),
+            "kdc": onda_cardinale(r.vento_dir),
+            "kl": _vento_label(float(r.vento_kn), float(r.vento_dir))[0],
+            "s": lab, "sc": col, "wc": wcol, "l": 1 if r.luce else 0,
+            "w": (round(sst) if sst == sst else None),
+            "sp": round(float(r.swell_pct)),
+        })
+    return out
 
-    nwp_line = (f'<polyline points="{" ".join(nwp)}" fill="none" stroke="#8b949e" '
-                f'stroke-width="1.2" stroke-dasharray="4 3" opacity="0.65"/>')
-    capt = (f'<text x="{pl}" y="{pt-8}" fill="#8b949e" font-size="11">onda (m)</text>'
-            f'<text x="{pl}" y="{y_wind0-h_wind-9}" fill="#8b949e" font-size="11">'
-            f'vento (kn) — <tspan fill="#3fb950">verde: amico</tspan> · '
-            f'<tspan fill="#d29922">ambra: contrario</tspan></text>')
-    return (f'<svg viewBox="0 0 {W} {H}" width="100%">'
-            f'{notte}{grid}{banda}{daysep}{bars}{nwp_line}{wbars}{daylab}{capt}</svg>')
+
+# Motore del grafico interattivo: curve morbide, fascia probabile, notte, vento,
+# crosshair che aggiorna il pannello "adesso" durante lo scrub, pillole giorno,
+# countdown del prossimo aggiornamento. Vanilla JS, zero dipendenze.
+JS_CHART = r"""
+(function(){
+const D=__DATA__, CRON=__CRON__;
+const svg=document.getElementById('ch'); if(!svg||!D.length) return;
+const W=940, PL=46, PR=14, PT=24, HW=170, GAP=42, HK=44, PB=26;
+const H=PT+HW+GAP+HK+PB; svg.setAttribute('viewBox','0 0 '+W+' '+H);
+const n=D.length, bw=(W-PL-PR)/n;
+const hsMax=Math.max(1, Math.max.apply(null,D.map(d=>d.b))*1.08);
+const kMax=Math.max(12, Math.max.apply(null,D.map(d=>d.k))*1.15);
+const X=i=>PL+(i+0.5)*bw, YH=v=>PT+HW*(1-v/hsMax);
+const yk0=PT+HW+GAP+HK, YK=v=>yk0-HK*Math.min(v,kMax)/kMax;
+const E=(t,a)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',t);
+  for(const k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;};
+let i0=0;while(i0<n){if(!D[i0].l){let j=i0;while(j<n&&!D[j].l)j++;
+  E('rect',{x:PL+i0*bw,y:PT,width:(j-i0)*bw,height:yk0-PT,fill:'#010409',opacity:.5});i0=j;}else i0++;}
+const step=hsMax<=2.5?0.5:1;
+for(let v=0;v<=hsMax;v+=step){E('line',{x1:PL,y1:YH(v),x2:W-PR,y2:YH(v),stroke:'#ffffff14'});
+  const t=E('text',{x:PL-6,y:YH(v)+3,'text-anchor':'end',fill:'#6e7681','font-size':11});t.textContent=v.toFixed(1);}
+if(kMax>10){E('line',{x1:PL,y1:YK(10),x2:W-PR,y2:YK(10),stroke:'#ffffff10'});
+  const t=E('text',{x:PL-6,y:YK(10)+3,'text-anchor':'end',fill:'#6e7681','font-size':10});t.textContent='10';}
+const days=[];D.forEach((d,i)=>{if(!days.length||days[days.length-1].dm!==d.dm)days.push({dm:d.dm,gg:d.gg,i:i});});
+days.forEach((d,k)=>{if(k>0)E('line',{x1:PL+d.i*bw,y1:PT,x2:PL+d.i*bw,y2:yk0,stroke:'#30363d','stroke-dasharray':'3 3'});
+  const t=E('text',{x:PL+d.i*bw+4,y:yk0+16,fill:'#8b949e','font-size':11});t.textContent=d.gg+' '+d.dm;});
+const defs=document.createElementNS(svg.namespaceURI,'defs');
+defs.innerHTML='<linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">'
+ +'<stop offset="0" stop-color="#58a6ff" stop-opacity="0.35"/>'
+ +'<stop offset="1" stop-color="#58a6ff" stop-opacity="0.02"/></linearGradient>';
+svg.appendChild(defs);
+function spline(p){if(p.length<2)return'';let s='M'+p[0][0].toFixed(1)+' '+p[0][1].toFixed(1);
+ for(let i=0;i<p.length-1;i++){const a=p[Math.max(0,i-1)],b=p[i],c=p[i+1],d=p[Math.min(p.length-1,i+2)];
+  s+='C'+(b[0]+(c[0]-a[0])/6).toFixed(1)+' '+(b[1]+(c[1]-a[1])/6).toFixed(1)+' '
+   +(c[0]-(d[0]-b[0])/6).toFixed(1)+' '+(c[1]-(d[1]-b[1])/6).toFixed(1)+' '
+   +c[0].toFixed(1)+' '+c[1].toFixed(1);} return s;}
+const pH=D.map((d,i)=>[X(i),YH(d.h)]), pA=D.map((d,i)=>[X(i),YH(d.a)]);
+const pB=D.map((d,i)=>[X(i),YH(d.b)]), pN=D.map((d,i)=>[X(i),YH(Math.min(d.nw,hsMax))]);
+let bd=spline(pB);
+pA.slice().reverse().forEach(p=>{bd+='L'+p[0].toFixed(1)+' '+p[1].toFixed(1);});
+E('path',{d:bd+'Z',fill:'#58a6ff',opacity:.13});
+E('path',{d:spline(pH)+'L'+X(n-1).toFixed(1)+' '+YH(0).toFixed(1)+'L'+X(0).toFixed(1)+' '+YH(0).toFixed(1)+'Z',fill:'url(#ga)'});
+E('path',{d:spline(pN),fill:'none',stroke:'#8b949e','stroke-width':1.2,'stroke-dasharray':'4 3',opacity:.6});
+E('path',{d:spline(pH),fill:'none',stroke:'#58a6ff','stroke-width':2});
+D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:PT+HW+10,width:bw+0.5,height:6,fill:d.sc,opacity:d.l?1:.45});});
+D.forEach((d,i)=>{E('rect',{x:PL+i*bw+bw*0.15,y:YK(d.k),width:bw*0.7,height:yk0-YK(d.k),rx:1,
+  fill:d.wc,'fill-opacity':d.l?1:.5});});
+let c1=E('text',{x:PL,y:PT-9,fill:'#8b949e','font-size':11});c1.textContent='onda (m)';
+let c2=E('text',{x:PL,y:yk0-HK-8,fill:'#8b949e','font-size':11});c2.textContent='vento (kn)';
+const cl=E('line',{y1:PT,y2:yk0,stroke:'#e6edf3','stroke-width':1,opacity:0,'stroke-dasharray':'2 3'});
+const cd=E('circle',{r:4.5,fill:'#58a6ff',stroke:'#0d1117','stroke-width':2,opacity:0});
+const fmt=v=>v.toFixed(1).replace('.',',');
+const $=id=>document.getElementById(id);
+function setRO(i,active){const d=D[i];
+ if($('ro-when'))$('ro-when').textContent=active?(d.gg+' '+d.dm+' · '+d.hh):'adesso';
+ if($('ro-hs'))$('ro-hs').textContent=fmt(d.h);
+ if($('ro-band'))$('ro-band').textContent=fmt(d.a)+'–'+fmt(d.b)+' m';
+ if($('ro-tp'))$('ro-tp').textContent=Math.round(d.p)+'s';
+ if($('ro-wdc'))$('ro-wdc').textContent=d.wdc;
+ const p=$('ro-pill');if(p){p.textContent=d.s;p.style.background=d.sc;}
+ const kv=$('ro-k');if(kv){kv.textContent=Math.round(d.k)+' kn';kv.style.color=d.wc;}
+ if($('ro-kl'))$('ro-kl').textContent=d.kdc+' · '+d.kl;
+ if($('ro-w'))$('ro-w').textContent=(d.w==null?'—':d.w+'°');
+ if($('ro-sp')){$('ro-sp').textContent=d.sp+'%';const b=$('ro-spb');if(b)b.style.width=d.sp+'%';}
+ const ar=$('ro-arrow');if(ar)ar.setAttribute('transform','rotate('+(d.wd+180)+' 32 32)');
+ cl.setAttribute('x1',X(i));cl.setAttribute('x2',X(i));cl.setAttribute('opacity',active?0.5:0);
+ cd.setAttribute('cx',X(i));cd.setAttribute('cy',YH(d.h));cd.setAttribute('opacity',active?1:0);}
+function idx(e){const r=svg.getBoundingClientRect();
+ const px=(e.clientX-r.left)*W/r.width;
+ return Math.max(0,Math.min(n-1,Math.round((px-PL)/bw-0.5)));}
+svg.addEventListener('pointermove',e=>setRO(idx(e),true));
+svg.addEventListener('pointerdown',e=>setRO(idx(e),true));
+svg.addEventListener('pointerleave',()=>setRO(0,false));
+const dp=$('dayps');
+if(dp)days.forEach(d=>{const b=document.createElement('button');b.className='dayp';
+ b.textContent=d.gg+' '+d.dm;
+ b.onclick=()=>setRO(Math.min(n-1,d.i+12),true);dp.appendChild(b);});
+function cnt(){const now=new Date();let best=null;
+ for(let g=0;g<2;g++)CRON.forEach(h=>{const t=new Date(Date.UTC(now.getUTCFullYear(),
+  now.getUTCMonth(),now.getUTCDate()+g,h,0,0));if(t>now&&(!best||t<best))best=t;});
+ if(!best)return;const m=Math.round((best-now)/60000);const el=$('cnt');
+ if(el)el.textContent='si aggiorna tra '+(m>=60?Math.floor(m/60)+'h '+(m%60)+'m':m+' min');}
+cnt();setInterval(cnt,30000);
+setRO(0,false);
+})();
+"""
 
 
 def _giorni(df):
@@ -469,6 +494,13 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
       text-align:center;margin-bottom:14px}
 .lock-t{font-size:15px;font-weight:600}
 .lock-s{font-size:12px;color:#8b949e;margin-top:5px;margin-bottom:4px}
+.meta2{font-size:12px;color:#6e7681;margin-top:3px}
+.meta2 span{color:#8b949e;font-weight:600}
+.dayps{display:flex;gap:6px;margin:0 2px 8px;flex-wrap:wrap}
+.dayp{background:#0d1117;border:1px solid #21262d;color:#8b949e;font-size:11px;
+      padding:3px 11px;border-radius:14px;cursor:pointer;font-family:inherit}
+.dayp:hover{color:#e6edf3;border-color:#8b949e}
+.hint{color:#6e7681;font-style:italic;margin-left:auto}
 .acc{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
 .acch{font-size:13px;font-weight:600;margin-bottom:3px}
 .accs{font-size:11px;color:#6e7681;margin-bottom:12px}
@@ -564,7 +596,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
 
     # Freemium: le 24h si vedono, il resto e' il prodotto che la piattaforma vende
     if gate:
-        chart = _chart(df72[df72.date < t0 + pd.Timedelta("24h")])
+        dfc = df72[df72.date < t0 + pd.Timedelta("24h")]
         titolo_chart = "onda e vento · prossime 24 ore"
         sblocca = (f'<a class="cta" href="{_utm(PREMIUM_URL)}">Sblocca con Premium →</a>'
                    if PREMIUM_URL else "")
@@ -572,10 +604,19 @@ def build_dashboard(df, wins, embed=False, gate=False):
                   f'<div class="lock-s">ora per ora · finestre surfabili con giorno e orario · '
                   f'fascia probabile misurata alla boa</div>{sblocca}</div>')
         cta = ""                        # nel free l'unico bottone e' lo sblocco
+        dayps_html = ""
     else:
-        chart = _chart(df72)
+        dfc = df72
         titolo_chart = "onda e vento · prossime 72 ore"
         centro = f'<div class="days">{giorni}</div>\n{tnd_html}'
+        dayps_html = '<div class="dayps" id="dayps"></div>'
+
+    js = (JS_CHART.replace("__DATA__", json.dumps(_dati_json(dfc), ensure_ascii=False))
+                  .replace("__CRON__", json.dumps(CRON_UTC)))
+    banda_meta = ("" if gate else
+                  f'<div class="meta2">probabile <span id="ro-band">'
+                  f'{f"{now.hs_p10:.1f}".replace(".", ",")}–'
+                  f'{f"{now.hs_p90:.1f}".replace(".", ",")} m</span></div>')
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
@@ -623,21 +664,22 @@ def build_dashboard(df, wins, embed=False, gate=False):
 
 <div class="hero">
   <div class="card">
-    <div class="k">adesso</div>
+    <div class="k" id="ro-when">adesso</div>
     <div class="now">
-      {_bussola(now.wave_direction, 72)}
+      {_bussola(now.wave_direction, 72, "ro-arrow")}
       <div>
-        <div class="hs">{now.hs_alisee:.1f} <span style="font-size:18px;color:#8b949e">m</span></div>
-        <div class="meta">{now.tp_alisee:.0f}s · da {onda_cardinale(now.wave_direction)}
-          &nbsp;<span class="pill" style="background:{col}">{lbl}</span></div>
+        <div class="hs"><span id="ro-hs">{f"{now.hs_alisee:.1f}".replace(".", ",")}</span> <span style="font-size:18px;color:#8b949e">m</span></div>
+        <div class="meta"><span id="ro-tp">{now.tp_alisee:.0f}s</span> · da <span id="ro-wdc">{onda_cardinale(now.wave_direction)}</span>
+          &nbsp;<span class="pill" id="ro-pill" style="background:{col}">{lbl}</span></div>
+        {banda_meta}
       </div>
     </div>
     <div class="mini">
-      <div><div class="v" style="color:{v_col}">{now.vento_kn:.0f} kn</div>
-        <div class="l">vento {onda_cardinale(now.vento_dir)} · {v_lbl}</div></div>
-      <div><div class="v">{sst_txt}</div><div class="l">acqua</div></div>
-      <div><div class="v">{swp:.0f}%</div><div class="l">mare lungo</div>
-        <div class="bar"><i style="width:{swp:.0f}%"></i></div></div>
+      <div><div class="v" id="ro-k" style="color:{v_col}">{now.vento_kn:.0f} kn</div>
+        <div class="l" id="ro-kl">{onda_cardinale(now.vento_dir)} · {v_lbl}</div></div>
+      <div><div class="v" id="ro-w">{sst_txt}</div><div class="l">acqua</div></div>
+      <div><div class="v" id="ro-sp">{swp:.0f}%</div><div class="l">mare lungo</div>
+        <div class="bar"><i id="ro-spb" style="width:{swp:.0f}%"></i></div></div>
       <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">{pk_l}</div></div>
     </div>
   </div>
@@ -653,11 +695,13 @@ def build_dashboard(df, wins, embed=False, gate=False):
 
 <div class="chart">
   <div class="ct"><span>{titolo_chart}</span>
-    <span>— — modello standard</span></div>
-  {chart}
+    <span>— — modello standard · <span id="cnt"></span></span></div>
+  {dayps_html}
+  <svg id="ch" viewBox="0 0 940 306" width="100%" style="touch-action:none;cursor:crosshair;display:block"></svg>
   <div class="legend">{_legenda()}
     <span class="lg"><i style="background:#58a6ff;opacity:.3"></i>fascia probabile</span>
-    <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span></div>
+    <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span>
+    <span class="hint">tocca o passa il mouse sul grafico: i numeri qui sopra seguono l'ora</span></div>
 </div>
 
 {centro}
@@ -672,7 +716,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
   di anticipo entrambi sbagliano di più.
 </div>
 <div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali{spons}</div>
-</div></body></html>"""
+</div><script>{js}</script></body></html>"""
     nome = ("widget-free.html" if gate else
             "widget.html" if embed else "dashboard.html")
     with open(os.path.join(BASE, nome), "w", encoding="utf-8") as f:
