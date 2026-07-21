@@ -107,21 +107,20 @@ _BANDA_PRED = [0.20, 0.50, 0.70, 0.90, 1.15, 1.50, 1.95, 2.60]
 _BANDA_P10  = [0.13, 0.32, 0.46, 0.62, 0.83, 1.11, 1.36, 2.01]
 _BANDA_P90  = [0.40, 0.62, 0.83, 1.08, 1.44, 1.78, 2.43, 3.25]
 
-STATI = {  # stato -> (etichetta, colore). "piatto" e "piccolo" restano etichette
-    # distinte nelle card, ma nel grafico hanno LO STESSO grigio: per chi guarda
-    # sono la stessa notizia (niente da surfare), due grigi diversi erano rumore.
-    # "piccolo" da solo era ambiguo (piccolo ma si surfa? no): l'etichetta deve
-    # dire da sola che non si va. E resta coerente con la legenda del grafico,
-    # dove piatto+troppo piccolo sono un unico grigio "niente da surfare".
-    "piatto":      ("piatto",         "#484f58"),
-    "piccolo":     ("troppo piccolo", "#484f58"),
-    "mosso/corto": ("mosso",     "#d29922"),
-    "surfabile":   ("surfabile", "#58a6ff"),
-    "BUONO":       ("buono",     "#3fb950"),
+STATI = {  # stato -> (etichetta, colore)
+    # Gergo tecnico del surf: termini INVARIABILI (niente concordanza maschile/
+    # femminile con "onda"/"qualita'"/"mare") e riconoscibili da chi surfa.
+    # flat e sotto misura condividono il grigio: per chi guarda sono la stessa
+    # notizia (non si va), due grigi diversi erano solo rumore.
+    "piatto":      ("flat",          "#484f58"),
+    "piccolo":     ("sotto misura",  "#484f58"),
+    "mosso/corto": ("choppy",        "#d29922"),
+    "surfabile":   ("surfabile",     "#58a6ff"),
+    "BUONO":       ("clean",         "#3fb950"),
 }
-# Legenda del grafico: solo le classi che si VEDONO (4 colori, non 5 stati)
-_LEGENDA = [("buono", "#3fb950"), ("surfabile", "#58a6ff"),
-            ("mosso", "#d29922"), ("niente da surfare", "#484f58")]
+# Legenda del grafico: le 4 classi che si VEDONO (il grigio copre due stati)
+_LEGENDA = [("clean", "#3fb950"), ("surfabile", "#58a6ff"),
+            ("choppy", "#d29922"), ("flat / sotto misura", "#484f58")]
 
 # Tint per i BADGE di stato (sfondo tenue + testo colorato + bordo): rende il
 # verdetto l'elemento piu' visibile, invece della pillina sbiadita.
@@ -1042,10 +1041,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
     <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span>
   </div>
   <div class="legend legend2"><span class="lgt">qualità surf:</span>
-    <span class="lg"><i style="background:#3fb950"></i>buono</span>
-    <span class="lg"><i style="background:#58a6ff"></i>surfabile</span>
-    <span class="lg"><i style="background:#d29922"></i>mosso</span>
-    <span class="lg"><i style="background:#484f58"></i>niente da surfare</span>
+    {_legenda()}
     <span class="hint">tocca o trascina sul grafico: i numeri in alto seguono l'ora</span></div>
   {cta_cam}
 </div>
@@ -1053,10 +1049,10 @@ def build_dashboard(df, wins, embed=False, gate=False):
 <div class="card best">
   <div class="k">{best_k}</div>
   {best_html}
-  <div class="best-foot">Come leggiamo il mare: <b>piatto</b> sotto 0,5 m · <b>troppo piccolo</b>
-    fino a 0,8 m · <b>surfabile</b> sopra 0,8 m · <b>mosso</b> se il vento onshore o l'onda
-    corta la rovinano · <b>buono</b> quando è formata (oltre 1,2 m, periodo lungo), lo swell
-    arriva da W/SW e il vento è a favore. Le finestre contano solo le ore di luce.
+  <div class="best-foot">Come leggiamo il mare: <b>flat</b> sotto 0,5 m · <b>sotto misura</b>
+    fino a 0,8 m · <b>surfabile</b> oltre 0,8 m · <b>choppy</b> quando vento onshore teso o
+    periodo corto scompongono l'onda · <b>clean</b> con onda formata (1,2–2,8 m, periodo ≥6s),
+    swell da W/SW e vento a favore. Finestre calcolate solo nelle ore di luce.
     "Probabile" = quanto può variare: 8 volte su 10 il mare sta in quell'intervallo.</div>
 </div>
 
