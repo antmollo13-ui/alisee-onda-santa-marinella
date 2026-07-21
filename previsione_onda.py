@@ -110,8 +110,11 @@ _BANDA_P90  = [0.40, 0.62, 0.83, 1.08, 1.44, 1.78, 2.43, 3.25]
 STATI = {  # stato -> (etichetta, colore). "piatto" e "piccolo" restano etichette
     # distinte nelle card, ma nel grafico hanno LO STESSO grigio: per chi guarda
     # sono la stessa notizia (niente da surfare), due grigi diversi erano rumore.
-    "piatto":      ("piatto",    "#484f58"),
-    "piccolo":     ("piccolo",   "#484f58"),
+    # "piccolo" da solo era ambiguo (piccolo ma si surfa? no): l'etichetta deve
+    # dire da sola che non si va. E resta coerente con la legenda del grafico,
+    # dove piatto+troppo piccolo sono un unico grigio "niente da surfare".
+    "piatto":      ("piatto",         "#484f58"),
+    "piccolo":     ("troppo piccolo", "#484f58"),
     "mosso/corto": ("mosso",     "#d29922"),
     "surfabile":   ("surfabile", "#58a6ff"),
     "BUONO":       ("buono",     "#3fb950"),
@@ -687,7 +690,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .hs small{font-size:16px;color:#8b949e;font-weight:400}
 .meta{font-size:13px;color:#8b949e;margin-top:5px}
 .vbadge{margin-left:auto;text-align:center;padding:10px 16px;border-radius:12px;border:1px solid}
-.vbadge .vb-t{font-size:18px;font-weight:600;letter-spacing:.02em;line-height:1}
+.vbadge .vb-t{font-size:18px;font-weight:600;letter-spacing:.02em;line-height:1;white-space:nowrap}
 .vbadge .vb-s{font-size:10px;opacity:.8;margin-top:3px;text-transform:uppercase;letter-spacing:.04em}
 .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:20px;color:#0d1117}
 .mini{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px;padding-top:14px;
@@ -1050,7 +1053,10 @@ def build_dashboard(df, wins, embed=False, gate=False):
 <div class="card best">
   <div class="k">{best_k}</div>
   {best_html}
-  <div class="best-foot">"Buono" = onda formata, swell da W/SW e vento a favore, di giorno.
+  <div class="best-foot">Come leggiamo il mare: <b>piatto</b> sotto 0,5 m · <b>troppo piccolo</b>
+    fino a 0,8 m · <b>surfabile</b> sopra 0,8 m · <b>mosso</b> se il vento onshore o l'onda
+    corta la rovinano · <b>buono</b> quando è formata (oltre 1,2 m, periodo lungo), lo swell
+    arriva da W/SW e il vento è a favore. Le finestre contano solo le ore di luce.
     "Probabile" = quanto può variare: 8 volte su 10 il mare sta in quell'intervallo.</div>
 </div>
 
