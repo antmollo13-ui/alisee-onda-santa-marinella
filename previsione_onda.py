@@ -306,7 +306,15 @@ def _dati_json(df):
     """Serializza le ore per il grafico interattivo (colori gia' risolti qui,
     cosi' il JS non deve conoscere le regole dello spot)."""
     out = []
-    for _, r in df.iterrows():
+    # Tendenza a 6 ore: per un surfista "sta montando o scemando?" conta quanto
+    # l'altezza stessa. +1 in aumento, -1 in calo, 0 stabile (soglia 10 cm).
+    hs = df.hs_alisee.tolist()
+    trend = []
+    for i in range(len(hs)):
+        j = min(i + 6, len(hs) - 1)
+        d = hs[j] - hs[i]
+        trend.append(1 if d > 0.10 else (-1 if d < -0.10 else 0))
+    for k, (_, r) in enumerate(df.iterrows()):
         lab, col = STATI[r.stato]
         _, wcol = _vento_label(float(r.vento_kn), float(r.vento_dir))
         sst = float(r.get("sea_surface_temperature", float("nan")))
@@ -324,8 +332,26 @@ def _dati_json(df):
             "w": (round(sst) if sst == sst else None),
             "sp": round(float(r.swell_pct)),
             "tb": TINT[r.stato][0], "tf": TINT[r.stato][1], "td": TINT[r.stato][2],
+            "tr": trend[k],
         })
     return out
+
+
+def _sparkline(vals, w=104, h=26):
+    """Micro-grafico dell'andamento del giorno dentro la card: l'occhio capisce
+    'sale, culmina, cala' senza leggere numeri."""
+    if not vals or len(vals) < 2:
+        return ""
+    lo, hi = min(vals), max(vals)
+    rng = max(hi - lo, 0.12)                     # evita la riga piatta schiacciata
+    pts = [(i * w / (len(vals) - 1), h - 3 - (v - lo) / rng * (h - 7))
+           for i, v in enumerate(vals)]
+    d = "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+    area = d + f" L{w} {h} L0 {h} Z"
+    return (f'<svg class="spark" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+            f'<path d="{area}" fill="currentColor" opacity=".13"/>'
+            f'<path d="{d}" fill="none" stroke="currentColor" stroke-width="1.6" '
+            f'stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
 # Motore del grafico interattivo: curve morbide, fascia probabile, notte, vento,
@@ -399,6 +425,14 @@ D.forEach((d,i)=>{E('rect',{x:PL+i*bw+bw*0.15,y:YK(d.k),width:bw*0.7,height:yk0-
   fill:d.wc,'fill-opacity':d.l?1:.5});});
 let c1=E('text',{x:PL,y:PT-8,fill:'#8b949e','font-size':fs});c1.textContent='onda (m)';
 let c2=E('text',{x:PL,y:yk0-HK-7,fill:'#8b949e','font-size':fs});c2.textContent='vento (kn)';
+// Marker del picco: il momento clou si vede senza cercarlo
+let iPk=0;D.forEach((d,i)=>{if(d.h>D[iPk].h)iPk=i;});
+if(D[iPk].h>=0.3){const px=X(iPk),py=YH(D[iPk].h);
+ E('circle',{cx:px,cy:py,r:3.5,fill:'#0d1117',stroke:'#58a6ff','stroke-width':2});
+ const lx=Math.min(Math.max(px,PL+26),W-PR-26);
+ const tp=E('text',{x:lx,y:Math.max(PT+11,py-11),'text-anchor':'middle',fill:'#c9d7e6',
+   'font-size':mob?10:11,'font-weight':600});
+ tp.textContent='picco '+fmt(D[iPk].h)+' m';}
 const cl=E('line',{y1:PT,y2:yk0,stroke:'#e6edf3','stroke-width':1,opacity:0,'stroke-dasharray':'2 3'});
 const cd=E('circle',{r:4.5,fill:'#58a6ff',stroke:'#0d1117','stroke-width':2,opacity:0});
 cl.style.transition='opacity .15s, transform .08s linear';
@@ -406,6 +440,10 @@ cd.style.transition='opacity .15s, transform .08s linear';
 function setRO(i,active){const d=D[i];
  if($('ro-when'))$('ro-when').textContent=active?('· '+d.gg+' '+d.dm+' '+d.hh):'';
  if($('ro-hs'))$('ro-hs').textContent=fmt(d.h);
+ const tr=$('ro-trend');
+ if(tr){const T=d.tr>0?['↑','in aumento','#3fb950']:(d.tr<0?['↓','in calo','#e0a92e']
+   :['→','stabile','#8b949e']);
+  tr.textContent=T[0]+' '+T[1];tr.style.color=T[2];}
  if($('ro-band'))$('ro-band').textContent=fmt(d.a)+'–'+fmt(d.b)+' m';
  if($('ro-tp'))$('ro-tp').textContent=Math.round(d.p)+'s';
  if($('ro-wdc'))$('ro-wdc').textContent=d.wdc;
@@ -429,6 +467,16 @@ if(dp){dp.innerHTML='';days.forEach(d=>{const b=document.createElement('button')
  b.textContent=d.gg+' '+d.dm;
  b.onclick=()=>setRO(Math.min(n-1,d.i+12),true);dp.appendChild(b);});}
 setRO(0,false);
+// Count-up del numero principale all'ingresso: piccolo tocco, alza molto la
+// percezione di "prodotto vivo". Una volta sola, non a ogni re-render.
+if(!window.__alisee_up){window.__alisee_up=1;
+ const el=$('ro-hs');
+ if(el&&(!window.matchMedia||!matchMedia('(prefers-reduced-motion:reduce)').matches)){
+  const tgt=D[0].h,t0=performance.now(),dur=800;
+  const step=t=>{const p=Math.min(1,(t-t0)/dur);
+   el.textContent=fmt(tgt*(1-Math.pow(1-p,3)));
+   if(p<1)requestAnimationFrame(step);else el.textContent=fmt(tgt);};
+  requestAnimationFrame(step);}}
 }
 render();
 let rT;window.addEventListener('resize',()=>{clearTimeout(rT);rT=setTimeout(render,150);});
@@ -456,7 +504,8 @@ def _giorni(df):
         out.append({"data": pd.Timestamp(d), "hs": r.hs_alisee, "tp": r.tp_alisee,
                     "dir": onda_cardinale(r.wave_direction), "stato": r.stato,
                     "win": win, "vento": r.vento_kn,
-                    "vdir": onda_cardinale(r.vento_dir)})
+                    "vdir": onda_cardinale(r.vento_dir),
+                    "serie": [round(float(v), 2) for v in g.hs_alisee.tolist()]})
     return out[:3]
 
 
@@ -577,6 +626,14 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .day .h{font-size:24px;font-weight:600;display:flex;align-items:baseline;gap:8px}
 .day .h .db{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;border:1px solid}
 .day .w{font-size:12px;color:#8b949e;margin-top:8px;line-height:1.5}
+.sparkwrap{margin-top:8px;line-height:0}
+.spark{display:block;width:100%;height:26px}
+/* freccia tendenza: sta montando o scemando? */
+.trend{font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle;white-space:nowrap}
+/* le card reagiscono: la pagina sembra viva, non stampata */
+.card,.upsell{transition:border-color .18s,transform .18s}
+.card:hover,.upsell:hover{border-color:#3d4754;transform:translateY(-1px)}
+.day:hover{transform:translateY(-2px)}
 .foot{font-size:11px;color:#6e7681;border-top:1px solid #21262d;padding-top:12px;line-height:1.6}
 .brand{margin-top:10px;font-size:12px;color:#6e7681}
 .brand b{color:#58a6ff;letter-spacing:.03em}
@@ -730,6 +787,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
                 f'<div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
                 f'<div class="h">{g["hs"]:.1f}<small style="font-size:14px;color:#8b949e"> m</small>'
                 f'<span class="db" style="background:{bg};color:{fg};border-color:{bd}">{et}</span></div>'
+                f'<div class="sparkwrap" style="color:{fg}">{_sparkline(g["serie"])}</div>'
                 f'<div class="w">{win} · {g["dir"]} · vento {g["vento"]:.0f} kn {g["vdir"]}</div></div>')
     giorni = "".join(_day_card(g) for g in _giorni(df72))
 
@@ -824,10 +882,25 @@ def build_dashboard(df, wins, embed=False, gate=False):
     il mare è poi tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
 </div>"""
 
+    # Anteprima quando il link viene condiviso (WhatsApp, IG, Telegram): senza
+    # questi tag esce un URL nudo. Il riassunto e' il dato del momento.
+    og_desc = (f"Onda {f'{now.hs_alisee:.1f}'.replace('.', ',')} m · "
+               f"{now.tp_alisee:.0f}s da {onda_cardinale(now.wave_direction)} · "
+               f"vento {now.vento_kn:.0f} kn — previsione 72h calibrata su strumenti reali")
+    # Favicon inline (onda ALISEE): nessun file da servire, nessuna richiesta in piu'
+    favicon = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'"
+               "%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Cpath d='M3 20c4-6 7 4 11-2s7 3 11-3'"
+               " stroke='%2358a6ff' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")
+
     doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="1800">
 <title>ALISEE Onda · {SPOT}</title>
+<link rel="icon" href="{favicon}">
+<meta property="og:title" content="Previsione onda e vento · {SPOT}">
+<meta property="og:description" content="{og_desc}">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0d1117">
 <style>{CSS}{CSS_EMBED if embed else ""}</style></head><body>
 {"" if embed else SFONDO}
 <div class="wrap">
@@ -842,7 +915,8 @@ def build_dashboard(df, wins, embed=False, gate=False):
     <div class="now">
       {_bussola(now.wave_direction, 66, "ro-arrow")}
       <div>
-        <div class="hs"><span id="ro-hs">{f"{now.hs_alisee:.1f}".replace(".", ",")}</span> <small>m</small></div>
+        <div class="hs"><span id="ro-hs">{f"{now.hs_alisee:.1f}".replace(".", ",")}</span> <small>m</small>
+          <span class="trend" id="ro-trend"></span></div>
         <div class="meta"><span id="ro-tp">{now.tp_alisee:.0f}s</span> · da <span id="ro-wdc">{onda_cardinale(now.wave_direction)}</span></div>
         {banda_meta}
       </div>
