@@ -95,6 +95,30 @@ STATI = {  # stato -> (etichetta, colore). "piatto" e "piccolo" restano etichett
 _LEGENDA = [("buono", "#3fb950"), ("surfabile", "#58a6ff"),
             ("mosso", "#d29922"), ("niente da surfare", "#484f58")]
 
+# Tint per i BADGE di stato (sfondo tenue + testo colorato + bordo): rende il
+# verdetto l'elemento piu' visibile, invece della pillina sbiadita.
+TINT = {
+    "piatto":      ("#1c2128", "#8b949e", "#30363d"),
+    "piccolo":     ("#1c2128", "#8b949e", "#30363d"),
+    "mosso/corto": ("#2a2109", "#e0a92e", "#5c4a12"),
+    "surfabile":   ("#0d2137", "#58a6ff", "#1c436e"),
+    "BUONO":       ("#10241a", "#3fb950", "#1f5133"),
+}
+_RANK = {"piatto": 0, "piccolo": 1, "mosso/corto": 2, "surfabile": 3, "BUONO": 4}
+
+
+def momento_migliore(df):
+    """Il momento surfabile migliore nelle ore di luce (rank stato, poi Hs).
+    E' il 'quando vale la pena' — riempie la card destra con un verdetto vero."""
+    luce = df[df.luce & (df.hs_alisee >= 0.6)]
+    if luce.empty:
+        return None
+    luce = luce.assign(_r=luce.stato.map(_RANK))
+    best = luce.sort_values(["_r", "hs_alisee"], ascending=False).iloc[0]
+    if best._r < 2:        # niente di meglio di "piccolo": non e' un consiglio
+        return None
+    return best
+
 
 _GG = {0: "lun", 1: "mar", 2: "mer", 3: "gio", 4: "ven", 5: "sab", 6: "dom"}
 
@@ -299,6 +323,7 @@ def _dati_json(df):
             "s": lab, "sc": col, "wc": wcol, "l": 1 if r.luce else 0,
             "w": (round(sst) if sst == sst else None),
             "sp": round(float(r.swell_pct)),
+            "tb": TINT[r.stato][0], "tf": TINT[r.stato][1], "td": TINT[r.stato][2],
         })
     return out
 
@@ -312,10 +337,15 @@ const D=__DATA__, CRON=__CRON__;
 const svg=document.getElementById('ch'); if(!svg||!D.length) return;
 const $=id=>document.getElementById(id);
 const fmt=v=>v.toFixed(1).replace('.',',');
+let lastW=0;
 function render(){
-svg.innerHTML='';
 const cw=Math.max(320,Math.round(svg.getBoundingClientRect().width)
   ||((svg.parentElement&&svg.parentElement.clientWidth)||940));
+// Guard anti-loop: il render cambia l'altezza SVG -> il parent cambia ->
+// il ResizeObserver riscatterebbe all'infinito. Ridisegna solo se la LARGHEZZA
+// e' davvero cambiata (>4px), non a ogni micro-variazione di altezza.
+if(Math.abs(cw-lastW)<5) return; lastW=cw;
+svg.innerHTML='';
 const mob=cw<560;
 const W=cw, PL=mob?32:46, PR=mob?6:14, PT=22, HW=mob?140:170,
       GAP=mob?34:42, HK=mob?34:44, PB=mob?22:26;
@@ -374,12 +404,13 @@ const cd=E('circle',{r:4.5,fill:'#58a6ff',stroke:'#0d1117','stroke-width':2,opac
 cl.style.transition='opacity .15s, transform .08s linear';
 cd.style.transition='opacity .15s, transform .08s linear';
 function setRO(i,active){const d=D[i];
- if($('ro-when'))$('ro-when').textContent=active?(d.gg+' '+d.dm+' · '+d.hh):'adesso';
+ if($('ro-when'))$('ro-when').textContent=active?('· '+d.gg+' '+d.dm+' '+d.hh):'';
  if($('ro-hs'))$('ro-hs').textContent=fmt(d.h);
  if($('ro-band'))$('ro-band').textContent=fmt(d.a)+'–'+fmt(d.b)+' m';
  if($('ro-tp'))$('ro-tp').textContent=Math.round(d.p)+'s';
  if($('ro-wdc'))$('ro-wdc').textContent=d.wdc;
- const p=$('ro-pill');if(p){p.textContent=d.s;p.style.background=d.sc;}
+ const bg=$('ro-badge');if(bg){bg.querySelector('.vb-t').textContent=d.s;
+  bg.style.background=d.tb;bg.style.color=d.tf;bg.style.borderColor=d.td;}
  const kv=$('ro-k');if(kv){kv.textContent=Math.round(d.k)+' kn';kv.style.color=d.wc;}
  if($('ro-kl'))$('ro-kl').textContent=d.kdc+' · '+d.kl;
  if($('ro-w'))$('ro-w').textContent=(d.w==null?'—':d.w+'°');
@@ -480,29 +511,47 @@ h1 span{color:#58a6ff}
 h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:6px}
 .upd{font-size:12px;color:#6e7681}
-.hero{display:grid;grid-template-columns:1.25fr 1fr;gap:14px;margin-bottom:14px}
-.card{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:16px 18px}
-.k{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
-.now{display:flex;align-items:center;gap:18px}
-.hs{font-size:40px;font-weight:600;line-height:1;letter-spacing:-.02em}
-.meta{font-size:13px;color:#8b949e;margin-top:6px}
+.hero{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.card{background:#161b22;border:1px solid #21262d;border-radius:14px;padding:16px 18px;
+      position:relative;overflow:hidden}
+.k{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;
+   display:flex;justify-content:space-between;align-items:center}
+.k .when2{color:#6e7681;text-transform:none;letter-spacing:0;font-weight:400}
+/* riga principale: onda + bussola + BADGE verdetto grande */
+.now{display:flex;align-items:center;gap:16px}
+.hs{font-size:44px;font-weight:600;line-height:.95;letter-spacing:-.02em}
+.hs small{font-size:16px;color:#8b949e;font-weight:400}
+.meta{font-size:13px;color:#8b949e;margin-top:5px}
+.vbadge{margin-left:auto;text-align:center;padding:10px 16px;border-radius:12px;border:1px solid}
+.vbadge .vb-t{font-size:18px;font-weight:600;letter-spacing:.02em;line-height:1}
+.vbadge .vb-s{font-size:10px;opacity:.8;margin-top:3px;text-transform:uppercase;letter-spacing:.04em}
 .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:20px;color:#0d1117}
-.mini{display:flex;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid #21262d}
-.mini div{flex:1}
-.mini .v{font-size:15px;font-weight:600}
-.mini .l{font-size:11px;color:#6e7681}
-.bar{height:5px;border-radius:3px;background:#30363d;overflow:hidden;margin-top:5px}
+.mini{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px;padding-top:14px;
+      border-top:1px solid #21262d}
+.mini .v{font-size:16px;font-weight:600}
+.mini .l{font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.03em;margin-top:2px}
+.bar{height:4px;border-radius:3px;background:#30363d;overflow:hidden;margin-top:6px}
 .bar i{display:block;height:100%;background:#58a6ff}
+/* card destra: il momento migliore */
+.best{display:flex;flex-direction:column;height:100%}
+.best-day{font-size:26px;font-weight:600;line-height:1.05;letter-spacing:-.01em}
+.best-sub{font-size:13px;color:#8b949e;margin-top:5px}
+.best-badge{align-self:flex-start;margin-top:12px;padding:8px 16px;border-radius:12px;border:1px solid}
+.best-badge .vb-t{font-size:17px;font-weight:600}
+.best-none{font-size:19px;font-weight:600;color:#8b949e;line-height:1.25}
+.best-foot{margin-top:auto;padding-top:12px;font-size:11px;color:#6e7681;line-height:1.5}
 .big{font-size:26px;font-weight:600;line-height:1.15}
 .sub{font-size:13px;color:#8b949e;margin-top:3px}
-.chart{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 14px 8px;margin-bottom:14px}
+.chart{background:#161b22;border:1px solid #21262d;border-radius:14px;padding:14px 14px 8px;margin-bottom:14px}
 .ct{display:flex;justify-content:space-between;font-size:12px;color:#8b949e;margin:0 2px 10px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 2px 0;font-size:11px;color:#8b949e}
 .lg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
 .days{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
-.day .d{font-size:12px;color:#8b949e;text-transform:capitalize;margin-bottom:6px}
-.day .h{font-size:22px;font-weight:600}
-.day .w{font-size:12px;color:#6e7681;margin-top:4px}
+.day{border-left:3px solid #30363d;border-radius:0 12px 12px 0}
+.day .d{font-size:12px;color:#8b949e;text-transform:capitalize;margin-bottom:8px;font-weight:500}
+.day .h{font-size:24px;font-weight:600;display:flex;align-items:baseline;gap:8px}
+.day .h .db{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;border:1px solid}
+.day .w{font-size:12px;color:#8b949e;margin-top:8px;line-height:1.5}
 .foot{font-size:11px;color:#6e7681;border-top:1px solid #21262d;padding-top:12px;line-height:1.6}
 .brand{margin-top:10px;font-size:12px;color:#6e7681}
 .brand b{color:#58a6ff;letter-spacing:.03em}
@@ -570,8 +619,9 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
  .hs{font-size:32px}
  .card{padding:12px 14px}
  .now{gap:12px}
- .mini{flex-wrap:wrap;gap:8px}
- .mini div{flex:1 1 42%}
+ .mini{grid-template-columns:repeat(2,1fr);gap:12px 10px}
+ .vbadge{margin-left:auto;padding:8px 12px}
+ .vbadge .vb-t{font-size:16px}
  .hero{gap:10px;margin-bottom:10px}
  .days{gap:8px;margin-bottom:10px}
  .chart{padding:10px 8px 6px;margin-bottom:10px}
@@ -618,33 +668,45 @@ def build_dashboard(df, wins, embed=False, gate=False):
     pk_l = ("picco 5 giorni · quando? con Premium" if gate else
             f"picco · {gg(pk.date)} {pk.date:%H}h · prob. {pk.hs_p10:.1f}–{pk.hs_p90:.1f}")
 
-    if gate and wins:
-        # L'esca: l'utente gratuito sa che la finestra ESISTE e quanto e' grande,
-        # ma giorno e orario sono il prodotto premium della piattaforma.
-        hs = wins[0][2]
-        win_html = (f'<div class="big">{hs:.1f} m in arrivo</div>'
-                    f'<div class="sub">c\'è una finestra surfabile nei prossimi 3 giorni'
-                    f' — giorno e orario riservati agli abbonati</div>')
-    elif wins:
-        a, b, hs, tp, dr, w10, w90 = wins[0]
-        win_html = (f'<div class="big">{hs:.1f} m</div>'
-                    f'<div class="sub">{gg(a)} {a:%d} · {a:%H:%M}–{b:%H:%M} · {tp:.0f}s {dr}'
-                    f'<br>probabile tra {w10:.1f} e {w90:.1f} m</div>')
+    best = momento_migliore(df72)
+    best_k = "momento migliore · 72h"
+    if gate:
+        # L'esca: c'e' una finestra ma il QUANDO e' premium.
+        best_k = "in arrivo"
+        if wins:
+            best_html = (f'<div class="best-day">{wins[0][2]:.1f} m in arrivo</div>'
+                         f'<div class="best-sub">c\'è una finestra surfabile nei prossimi giorni'
+                         f' — giorno e orario riservati agli abbonati</div>')
+        else:
+            best_html = ('<div class="best-none">Mare piatto ora</div>'
+                         '<div class="best-sub">controlla di nuovo: gli abbonati vedono 5 giorni</div>')
+    elif best is not None:
+        bg, fg, bd = TINT[best.stato]
+        et = STATI[best.stato][0]
+        best_html = (
+            f'<div class="best-day">{gg(best.date)} {best.date:%d/%m}</div>'
+            f'<div class="best-sub">ore {best.date:%H}:00 · {best.hs_alisee:.1f} m · '
+            f'{best.tp_alisee:.0f}s da {onda_cardinale(best.wave_direction)} · '
+            f'vento {best.vento_kn:.0f} kn</div>'
+            f'<div class="best-badge" style="background:{bg};color:{fg};border-color:{bd}">'
+            f'<span class="vb-t">{et}</span></div>')
     else:
-        # Giorno piatto: MAI un vicolo cieco — dai sempre un motivo per tornare.
-        risalita = next((f"possibile onda {gg(d)} (~{h:.1f} m): torna a controllare"
-                         for d, h in tnd if h >= 0.8),
-                        "piatto anche nella tendenza — ricontrolla domani")
-        win_html = ('<div class="big" style="color:#6e7681">—</div>'
-                    f'<div class="sub">niente onda nelle 72h · {risalita}</div>')
+        # Niente di buono nelle 72h: mai un vicolo cieco, guarda la tendenza.
+        risalita = next((f"possibile risalita {gg(d)} (~{h:.1f} m)"
+                         for d, h in tnd if h >= 0.8), "ancora piatto nei prossimi giorni")
+        best_html = ('<div class="best-none">Niente di surfabile<br>nelle prossime 72 ore</div>'
+                     f'<div class="best-sub">{risalita} · torna a controllare</div>')
 
-    giorni = "".join(
-        f'<div class="card day"><div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
-        f'<div class="h">{g["hs"]:.1f} m <span class="pill" style="background:'
-        f'{STATI[g["stato"]][1]};font-size:10px">{STATI[g["stato"]][0]}</span></div>'
-        f'<div class="w">picco {g["tp"]:.0f}s {g["dir"]} · vento {g["vento"]:.0f}kn '
-        f'{g["vdir"]} · finestra {g["win"]}</div></div>'
-        for g in _giorni(df72))
+    def _day_card(g):
+        bg, fg, bd = TINT[g["stato"]]
+        et = STATI[g["stato"]][0]
+        win = (f'finestra {g["win"]}' if g["win"] != "—" else 'niente onda')
+        return (f'<div class="card day" style="border-left-color:{fg}">'
+                f'<div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
+                f'<div class="h">{g["hs"]:.1f}<small style="font-size:14px;color:#8b949e"> m</small>'
+                f'<span class="db" style="background:{bg};color:{fg};border-color:{bd}">{et}</span></div>'
+                f'<div class="w">{win} · {g["dir"]} · vento {g["vento"]:.0f} kn {g["vdir"]}</div></div>')
+    giorni = "".join(_day_card(g) for g in _giorni(df72))
 
     # Tendenza 4-5 giorni: il motivo per tornare domani (e' il dato che evolve)
     tnd_html = ""
@@ -698,6 +760,13 @@ def build_dashboard(df, wins, embed=False, gate=False):
     ultima, prossima = orari_run()
     pross_txt = (f" · prossima {gg(prossima)} {prossima:%H:%M}" if prossima else "")
 
+    # Badge verdetto "adesso": e' l'elemento che deve saltare all'occhio (si
+    # surfa o no?), non piu' la pillina sbiadita.
+    nbg, nfg, nbd = TINT[now.stato]
+    vbadge = (f'<div class="vbadge" id="ro-badge" style="background:{nbg};color:{nfg};'
+              f'border-color:{nbd}"><div class="vb-t">{lbl}</div>'
+              f'<div class="vb-s">qualità surf</div></div>')
+
     # Marchio: solo ALISEE, oppure "ALISEE × Partner" se il co-branding e' acceso.
     marchio = (f'ALISEE <span class="x">×</span> {PARTNER}' if PARTNER
                else 'ALISEE <span>Onda</span>')
@@ -742,15 +811,15 @@ def build_dashboard(df, wins, embed=False, gate=False):
 
 <div class="hero">
   <div class="card">
-    <div class="k" id="ro-when">adesso</div>
+    <div class="k">adesso <span class="when2" id="ro-when"></span></div>
     <div class="now">
-      {_bussola(now.wave_direction, 72, "ro-arrow")}
+      {_bussola(now.wave_direction, 66, "ro-arrow")}
       <div>
-        <div class="hs"><span id="ro-hs">{f"{now.hs_alisee:.1f}".replace(".", ",")}</span> <span style="font-size:18px;color:#8b949e">m</span></div>
-        <div class="meta"><span id="ro-tp">{now.tp_alisee:.0f}s</span> · da <span id="ro-wdc">{onda_cardinale(now.wave_direction)}</span>
-          &nbsp;<span class="pill" id="ro-pill" style="background:{col}">{lbl}</span></div>
+        <div class="hs"><span id="ro-hs">{f"{now.hs_alisee:.1f}".replace(".", ",")}</span> <small>m</small></div>
+        <div class="meta"><span id="ro-tp">{now.tp_alisee:.0f}s</span> · da <span id="ro-wdc">{onda_cardinale(now.wave_direction)}</span></div>
         {banda_meta}
       </div>
+      {vbadge}
     </div>
     <div class="mini">
       <div><div class="v" id="ro-k" style="color:{v_col}">{now.vento_kn:.0f} kn</div>
@@ -761,12 +830,11 @@ def build_dashboard(df, wins, embed=False, gate=False):
       <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">{pk_l}</div></div>
     </div>
   </div>
-  <div class="card">
-    <div class="k">prossima finestra surfabile</div>
-    {win_html}
-    <div class="mini"><div><div class="l" style="line-height:1.6">"Buono" = onda formata,
-      swell da W/SW e vento a favore. Finestre solo nelle ore di luce. "Probabile" = quanto
-      può variare: 8 volte su 10 il mare sta in quell'intervallo.</div></div></div>
+  <div class="card best">
+    <div class="k">{best_k}</div>
+    {best_html}
+    <div class="best-foot">"Buono" = onda formata, swell da W/SW e vento a favore, di giorno.
+      "Probabile" = quanto può variare: 8 volte su 10 il mare sta in quell'intervallo.</div>
   </div>
 </div>
 
