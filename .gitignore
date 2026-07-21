@@ -17,6 +17,7 @@
 
 # Ambiente + automazione
 !requirements.txt
+!CNAME
 !.github/
 !.github/workflows/
 !.github/workflows/dashboard.yml

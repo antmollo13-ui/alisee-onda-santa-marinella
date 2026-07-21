@@ -37,6 +37,7 @@ jobs:
       - name: Prepara la cartella da pubblicare
         run: |
           mkdir -p site
+          cp CNAME site/                      # dominio custom: senza questo si perde a ogni deploy
           cp dashboard.html site/index.html   # pagina pubblica
           cp widget.html    site/widget.html  # widget incorporabile dal cliente
           cp previsione_onda_72h.csv site/ || true
