@@ -495,16 +495,38 @@ def _legenda():
 
 # In modalita' embed la pagina vive dentro un iframe sul sito del cliente:
 # sfondo trasparente (si adatta alla loro pagina) e niente padding esterno.
+# Lo sfondo a onde resta FUORI dall'embed: dentro la pagina del cliente
+# competerebbe col loro design.
 CSS_EMBED = """
 body{background:transparent;padding:0}
 .wrap{max-width:none}
+.bg{display:none}
 """
+
+# Onde di sfondo: due creste sfasate, path che si ripete ogni 1440px cosi'
+# la traslazione del 50% e' continua (nessuno scatto al riavvolgimento).
+SFONDO = """<div class="bg" aria-hidden="true"><svg viewBox="0 0 2880 320" preserveAspectRatio="none">
+<path class="w1" fill="#1f6feb" fill-opacity=".07" d="M0,170 C240,120 480,215 720,168 C960,122 1200,212 1440,170
+ C1680,120 1920,215 2160,168 C2400,122 2640,212 2880,170 L2880,320 L0,320 Z"/>
+<path class="w2" fill="#58a6ff" fill-opacity=".05" d="M0,205 C300,165 540,245 720,208 C900,172 1140,248 1440,205
+ C1740,165 1980,245 2160,208 C2340,172 2580,248 2880,205 L2880,320 L0,320 Z"/>
+</svg></div>"""
 
 CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,sans-serif;
      padding:24px;line-height:1.5;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1000px;margin:0 auto}
+/* Sfondo: profondita' marina + onde in SVG (nessuna immagine esterna, peso zero).
+   Volutamente TENUE: e' uno strumento di dati, lo sfondo non deve competere. */
+.bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;
+    background:radial-gradient(900px 500px at 15% -15%, #16304a 0%, transparent 62%),
+               radial-gradient(700px 420px at 95% 5%, #10283f 0%, transparent 60%),
+               linear-gradient(180deg,#0d1117 0%,#0a1420 55%,#081019 100%)}
+.bg svg{position:absolute;left:0;bottom:0;width:200%;height:min(42vh,340px)}
+.bg .w1{animation:drift 46s linear infinite}
+.bg .w2{animation:drift 78s linear infinite reverse}
+@keyframes drift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.wrap{max-width:1000px;margin:0 auto;position:relative}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px}
 h1{font-size:19px;font-weight:600;letter-spacing:-.01em}
 h1 span{color:#58a6ff}
@@ -512,7 +534,10 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:6px}
 .upd{font-size:12px;color:#6e7681}
 .hero{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-.card{background:#161b22;border:1px solid #21262d;border-radius:14px;padding:16px 18px;
+/* Card leggermente traslucide: lo sfondo si intravede (effetto vetro) ma
+   l'opacita' resta alta perche' i dati devono restare nitidi. */
+.card{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+      border:1px solid #21262d;border-radius:14px;padding:16px 18px;
       position:relative;overflow:hidden}
 .k{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;
    display:flex;justify-content:space-between;align-items:center}
@@ -542,7 +567,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .best-foot{margin-top:auto;padding-top:12px;font-size:11px;color:#6e7681;line-height:1.5}
 .big{font-size:26px;font-weight:600;line-height:1.15}
 .sub{font-size:13px;color:#8b949e;margin-top:3px}
-.chart{background:#161b22;border:1px solid #21262d;border-radius:14px;padding:14px 14px 8px;margin-bottom:14px}
+.chart{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #21262d;border-radius:14px;padding:14px 14px 8px;margin-bottom:14px}
 .ct{display:flex;justify-content:space-between;font-size:12px;color:#8b949e;margin:0 2px 10px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 2px 0;font-size:11px;color:#8b949e}
 .lg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
@@ -555,7 +580,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .foot{font-size:11px;color:#6e7681;border-top:1px solid #21262d;padding-top:12px;line-height:1.6}
 .brand{margin-top:10px;font-size:12px;color:#6e7681}
 .brand b{color:#58a6ff;letter-spacing:.03em}
-.trend{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:10px 18px;
+.trend{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #21262d;border-radius:12px;padding:10px 18px;
        margin-bottom:14px;font-size:13px}
 .trend b{color:#e6edf3;font-weight:600}
 .trend span{font-size:11px;color:#6e7681}
@@ -567,7 +592,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .legend2{margin-top:6px}
 .lgt{font-size:11px;color:#6e7681;margin-right:2px}
 .legend svg{vertical-align:middle;margin-right:5px}
-.upsell{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#161b22;
+.upsell{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
         border:1px solid #26364a;border-radius:12px;padding:16px 18px;margin-bottom:14px;
         position:relative;overflow:hidden}
 .upsell:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#58a6ff}
@@ -587,7 +612,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .spons{color:#6e7681}
 .spons b{color:#e6edf3}
-.lock{background:#161b22;border:1px dashed #30363d;border-radius:12px;padding:22px 18px;
+.lock{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px dashed #30363d;border-radius:12px;padding:22px 18px;
       text-align:center;margin-bottom:14px}
 .lock-t{font-size:15px;font-weight:600}
 .lock-s{font-size:12px;color:#8b949e;margin-top:5px;margin-bottom:4px}
@@ -598,7 +623,7 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
       padding:3px 11px;border-radius:14px;cursor:pointer;font-family:inherit}
 .dayp:hover{color:#e6edf3;border-color:#8b949e}
 .hint{color:#6e7681;font-style:italic;margin-left:auto}
-.acc{background:#161b22;border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
+.acc{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
 .acch{font-size:13px;font-weight:600;margin-bottom:3px}
 .accs{font-size:11px;color:#6e7681;margin-bottom:12px}
 .acgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
@@ -803,7 +828,9 @@ def build_dashboard(df, wins, embed=False, gate=False):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="1800">
 <title>ALISEE Onda · {SPOT}</title>
-<style>{CSS}{CSS_EMBED if embed else ""}</style></head><body><div class="wrap">
+<style>{CSS}{CSS_EMBED if embed else ""}</style></head><body>
+{"" if embed else SFONDO}
+<div class="wrap">
 <div class="top">
   {titolo}
   {firma}
