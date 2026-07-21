@@ -683,10 +683,13 @@ body{background:transparent;padding:0}
 # Onde di sfondo: due creste sfasate, path che si ripete ogni 1440px cosi'
 # la traslazione del 50% e' continua (nessuno scatto al riavvolgimento).
 SFONDO = """<div class="bg" aria-hidden="true"><svg viewBox="0 0 2880 320" preserveAspectRatio="none">
-<path class="w1" fill="#1f6feb" fill-opacity=".07" d="M0,170 C240,120 480,215 720,168 C960,122 1200,212 1440,170
+<path class="w1" fill="#1f6feb" fill-opacity=".22" d="M0,170 C240,120 480,215 720,168 C960,122 1200,212 1440,170
  C1680,120 1920,215 2160,168 C2400,122 2640,212 2880,170 L2880,320 L0,320 Z"/>
-<path class="w2" fill="#58a6ff" fill-opacity=".05" d="M0,205 C300,165 540,245 720,208 C900,172 1140,248 1440,205
+<path class="w2" fill="#58a6ff" fill-opacity=".14" d="M0,205 C300,165 540,245 720,208 C900,172 1140,248 1440,205
  C1740,165 1980,245 2160,208 C2340,172 2580,248 2880,205 L2880,320 L0,320 Z"/>
+<path class="w1" fill="none" stroke="#58a6ff" stroke-opacity=".35" stroke-width="2"
+ d="M0,170 C240,120 480,215 720,168 C960,122 1200,212 1440,170
+ C1680,120 1920,215 2160,168 C2400,122 2640,212 2880,170"/>
 </svg></div>"""
 
 CSS = """
@@ -696,10 +699,10 @@ body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,
 /* Sfondo: profondita' marina + onde in SVG (nessuna immagine esterna, peso zero).
    Volutamente TENUE: e' uno strumento di dati, lo sfondo non deve competere. */
 .bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;
-    background:radial-gradient(900px 500px at 15% -15%, #16304a 0%, transparent 62%),
-               radial-gradient(700px 420px at 95% 5%, #10283f 0%, transparent 60%),
-               linear-gradient(180deg,#0d1117 0%,#0a1420 55%,#081019 100%)}
-.bg svg{position:absolute;left:0;bottom:0;width:200%;height:min(42vh,340px)}
+    background:radial-gradient(900px 500px at 15% -12%, #1b3d5c 0%, transparent 62%),
+               radial-gradient(700px 420px at 95% 5%, #143452 0%, transparent 60%),
+               linear-gradient(180deg,#0d1117 0%,#0b1a29 55%,#07131d 100%)}
+.bg svg{position:absolute;left:0;bottom:0;width:200%;height:min(52vh,420px)}
 .bg .w1{animation:drift 46s linear infinite}
 .bg .w2{animation:drift 78s linear infinite reverse}
 @keyframes drift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
