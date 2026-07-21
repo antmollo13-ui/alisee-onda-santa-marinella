@@ -443,7 +443,8 @@ const cw=Math.max(320,Math.round(svg.getBoundingClientRect().width)
 if(Math.abs(cw-lastW)<5) return; lastW=cw;
 svg.innerHTML='';
 const mob=cw<560;
-const W=cw, PL=mob?32:46, PR=mob?6:14, PT=22, HW=mob?140:170,
+// PT ampio: sopra il grafico ci va l'etichetta data/ora che segue il puntatore
+const W=cw, PL=mob?32:46, PR=mob?6:14, PT=mob?42:46, HW=mob?140:170,
       GAP=mob?34:42, HK=mob?34:44, PB=mob?22:26;
 const H=PT+HW+GAP+HK+PB;
 svg.setAttribute('viewBox','0 0 '+W+' '+H);
@@ -507,6 +508,17 @@ const cl=E('line',{y1:PT,y2:yk0,stroke:'#e6edf3','stroke-width':1,opacity:0,'str
 const cd=E('circle',{r:4.5,fill:'#58a6ff',stroke:'#0d1117','stroke-width':2,opacity:0});
 cl.style.transition='opacity .15s, transform .08s linear';
 cd.style.transition='opacity .15s, transform .08s linear';
+// Etichetta data/ora ANCORATA AL PUNTATORE: mentre scorri sai sempre quando sei,
+// senza dover alzare gli occhi in cima alla pagina.
+const tw=mob?116:150, th=22;
+const tg=E('g',{opacity:0});tg.style.transition='opacity .15s';
+const tr_=document.createElementNS(svg.namespaceURI,'rect');
+tr_.setAttribute('width',tw);tr_.setAttribute('height',th);tr_.setAttribute('rx',6);
+tr_.setAttribute('fill','#161b22');tr_.setAttribute('stroke','#3d4754');
+const tt=document.createElementNS(svg.namespaceURI,'text');
+tt.setAttribute('text-anchor','middle');tt.setAttribute('fill','#e6edf3');
+tt.setAttribute('font-size',mob?10:11);tt.setAttribute('font-weight','600');
+tg.appendChild(tr_);tg.appendChild(tt);svg.appendChild(tg);
 function setRO(i,active){const d=D[i];
  if($('ro-when'))$('ro-when').textContent=active?('· '+d.gg+' '+d.dm+' '+d.hh):'';
  if($('ro-hs'))$('ro-hs').textContent=fmt(d.h);
@@ -525,7 +537,13 @@ function setRO(i,active){const d=D[i];
  if($('ro-sp')){$('ro-sp').textContent=d.sp+'%';const b=$('ro-spb');if(b)b.style.width=d.sp+'%';}
  const ar=$('ro-arrow');if(ar)ar.setAttribute('transform','rotate('+(d.wd+180)+' 32 32)');
  cl.setAttribute('x1',X(i));cl.setAttribute('x2',X(i));cl.setAttribute('opacity',active?0.5:0);
- cd.setAttribute('cx',X(i));cd.setAttribute('cy',YH(d.h));cd.setAttribute('opacity',active?1:0);}
+ cd.setAttribute('cx',X(i));cd.setAttribute('cy',YH(d.h));cd.setAttribute('opacity',active?1:0);
+ // etichetta che segue il puntatore, tenuta dentro i bordi del grafico
+ const tx=Math.min(Math.max(X(i),PL+tw/2),W-PR-tw/2);
+ tr_.setAttribute('x',tx-tw/2);tr_.setAttribute('y',PT-th-8);
+ tt.setAttribute('x',tx);tt.setAttribute('y',PT-th+7);
+ tt.textContent=d.gg+' '+d.dm+' · '+d.hh+'  ·  '+fmt(d.h)+' m';
+ tg.setAttribute('opacity',active?1:0);}
 function idx(e){const r=svg.getBoundingClientRect();
  const px=(e.clientX-r.left)*W/r.width;
  return Math.max(0,Math.min(n-1,Math.round((px-PL)/bw-0.5)));}
@@ -652,7 +670,9 @@ h1 span{color:#58a6ff}
 h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:6px}
 .upd{font-size:12px;color:#6e7681}
-.hero{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+/* "adesso" a tutta larghezza: il momento migliore ora sta sotto il grafico,
+   dove ha senso leggerlo (dopo aver visto l'andamento). */
+.hero{margin-bottom:14px}
 /* Card leggermente traslucide: lo sfondo si intravede (effetto vetro) ma
    l'opacita' resta alta perche' i dati devono restare nitidi. */
 .card{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
@@ -676,14 +696,19 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .mini .l{font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.03em;margin-top:2px}
 .bar{height:4px;border-radius:3px;background:#30363d;overflow:hidden;margin-top:6px}
 .bar i{display:block;height:100%;background:#58a6ff}
-/* card destra: il momento migliore */
-.best{display:flex;flex-direction:column;height:100%}
-.best-day{font-size:26px;font-weight:600;line-height:1.05;letter-spacing:-.01em}
-.best-sub{font-size:13px;color:#8b949e;margin-top:5px}
-.best-badge{align-self:flex-start;margin-top:12px;padding:8px 16px;border-radius:12px;border:1px solid}
+/* card "momento migliore": sotto il grafico, in orizzontale */
+.best{margin-bottom:14px;display:grid;grid-template-columns:auto auto 1fr;
+      align-items:center;gap:8px 20px}
+.best .k{grid-column:1/-1;grid-row:1;margin-bottom:2px}
+.best-day{grid-column:1;grid-row:2;font-size:26px;font-weight:600;line-height:1.05;letter-spacing:-.01em}
+.best-none{grid-column:1;grid-row:2;font-size:19px;font-weight:600;color:#8b949e;line-height:1.25}
+.best-badge{grid-column:2;grid-row:2;padding:8px 16px;border-radius:12px;border:1px solid;justify-self:start}
 .best-badge .vb-t{font-size:17px;font-weight:600}
-.best-none{font-size:19px;font-weight:600;color:#8b949e;line-height:1.25}
-.best-foot{margin-top:auto;padding-top:12px;font-size:11px;color:#6e7681;line-height:1.5}
+.best-sub{grid-column:3;grid-row:2;font-size:13px;color:#8b949e}
+.best-foot{grid-column:1/-1;grid-row:3;margin-top:6px;padding-top:10px;
+           border-top:1px solid #21262d;font-size:11px;color:#6e7681;line-height:1.5}
+@media(max-width:640px){.best{grid-template-columns:1fr;gap:6px}
+  .best-day,.best-none,.best-badge,.best-sub{grid-column:1;grid-row:auto}}
 .big{font-size:26px;font-weight:600;line-height:1.15}
 .sub{font-size:13px;color:#8b949e;margin-top:3px}
 .chart{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #21262d;border-radius:14px;padding:14px 14px 8px;margin-bottom:14px}
@@ -1001,12 +1026,6 @@ def build_dashboard(df, wins, embed=False, gate=False):
       <div><div class="v">{pk.hs_alisee:.1f} m</div><div class="l">{pk_l}</div></div>
     </div>
   </div>
-  <div class="card best">
-    <div class="k">{best_k}</div>
-    {best_html}
-    <div class="best-foot">"Buono" = onda formata, swell da W/SW e vento a favore, di giorno.
-      "Probabile" = quanto può variare: 8 volte su 10 il mare sta in quell'intervallo.</div>
-  </div>
 </div>
 
 <div class="chart">
@@ -1026,6 +1045,13 @@ def build_dashboard(df, wins, embed=False, gate=False):
     <span class="lg"><i style="background:#484f58"></i>niente da surfare</span>
     <span class="hint">tocca o trascina sul grafico: i numeri in alto seguono l'ora</span></div>
   {cta_cam}
+</div>
+
+<div class="card best">
+  <div class="k">{best_k}</div>
+  {best_html}
+  <div class="best-foot">"Buono" = onda formata, swell da W/SW e vento a favore, di giorno.
+    "Probabile" = quanto può variare: 8 volte su 10 il mare sta in quell'intervallo.</div>
 </div>
 
 {centro}
