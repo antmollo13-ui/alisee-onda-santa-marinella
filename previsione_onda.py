@@ -453,8 +453,10 @@ if(Math.abs(cw-lastW)<5) return; lastW=cw;
 svg.innerHTML='';
 const mob=cw<560;
 // PT ampio: sopra il grafico ci va l'etichetta data/ora che segue il puntatore
+// GAP piu' ampio: fra onda e traccia inferiore ci sta la FASCIA QUALITA' SURF
+// con la sua etichetta (prima era una strisciolina anonima di 6px).
 const W=cw, PL=mob?32:46, PR=mob?6:14, PT=mob?42:46, HW=mob?140:170,
-      GAP=mob?34:42, HK=mob?34:44, PB=mob?22:26;
+      GAP=mob?46:52, HK=mob?34:44, PB=mob?22:26;
 const H=PT+HW+GAP+HK+PB;
 svg.setAttribute('viewBox','0 0 '+W+' '+H);
 svg.style.height=H+'px';
@@ -503,7 +505,14 @@ if(!window.matchMedia||!matchMedia('(prefers-reduced-motion:reduce)').matches){
   try{const L=line.getTotalLength();line.style.strokeDasharray=L;line.style.strokeDashoffset=L;
    line.style.transition='stroke-dashoffset 1s ease';
    requestAnimationFrame(()=>{requestAnimationFrame(()=>{line.style.strokeDashoffset=0;});});}catch(e){}}
-D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:PT+HW+9,width:bw+0.5,height:6,fill:d.sc,opacity:d.l?1:.45});});
+// FASCIA QUALITA' SURF: e' il verdetto ora per ora. Etichettata e spessa,
+// altrimenti la legenda parla di colori che nessuno sa dove trovare.
+{const qy=PT+HW+20, qh=mob?9:11;
+ const ql=E('text',{x:PL,y:qy-4,fill:'#8b949e','font-size':fs});
+ ql.textContent='qualità surf';
+ E('rect',{x:PL,y:qy,width:W-PL-PR,height:qh,rx:2,fill:'#0d1117'});
+ D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:qy,width:bw+0.5,height:qh,
+   fill:d.sc,opacity:d.l?1:.45});});}
 D.forEach((d,i)=>{const v=M.get(d);
  E('rect',{x:PL+i*bw+bw*0.15,y:YK(v),width:bw*0.7,height:yk0-YK(v),rx:1,
   fill:M.col(d),'fill-opacity':d.l?1:.5});});
@@ -1085,7 +1094,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
     <span class="lg"><i style="background:#58a6ff;opacity:.3"></i>fascia probabile</span>
     <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span>
   </div>
-  <div class="legend legend2"><span class="lgt">qualità surf:</span>
+  <div class="legend legend2"><span class="lgt">la fascia "qualità surf" nel grafico:</span>
     {_legenda()}
     <span class="hint">tocca o trascina sul grafico: i numeri in alto seguono l'ora</span></div>
   {cta_cam}
