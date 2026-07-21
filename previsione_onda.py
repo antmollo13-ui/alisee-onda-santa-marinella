@@ -436,6 +436,13 @@ const svg=document.getElementById('ch'); if(!svg||!D.length) return;
 const $=id=>document.getElementById(id);
 const fmt=v=>v.toFixed(1).replace('.',',');
 let lastW=0;
+// Traccia inferiore commutabile: il periodo e' un dato chiave e senza questo
+// non sarebbe graficato da nessuna parte.
+let METRICA='vento';
+const METRICHE={
+  vento:  {lab:'vento (kn)',  get:d=>d.k, col:d=>d.wc, min:12, dec:0, u:'kn'},
+  periodo:{lab:'periodo (s)', get:d=>d.p, col:()=>'#7f77dd', min:8,  dec:0, u:'s'}
+};
 function render(){
 const cw=Math.max(320,Math.round(svg.getBoundingClientRect().width)
   ||((svg.parentElement&&svg.parentElement.clientWidth)||940));
@@ -452,8 +459,9 @@ const H=PT+HW+GAP+HK+PB;
 svg.setAttribute('viewBox','0 0 '+W+' '+H);
 svg.style.height=H+'px';
 const n=D.length, bw=(W-PL-PR)/n;
+const M=METRICHE[METRICA];
 const hsMax=Math.max(1, Math.max.apply(null,D.map(d=>d.b))*1.08);
-const kMax=Math.max(12, Math.max.apply(null,D.map(d=>d.k))*1.15);
+const kMax=Math.max(M.min, Math.max.apply(null,D.map(M.get))*1.15);
 const X=i=>PL+(i+0.5)*bw, YH=v=>PT+HW*(1-v/hsMax);
 const yk0=PT+HW+GAP+HK, YK=v=>yk0-HK*Math.min(v,kMax)/kMax;
 const E=(t,a)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',t);
@@ -464,8 +472,10 @@ const fs=mob?10:11;
 const step=hsMax<=2.5?0.5:1;
 for(let v=0;v<=hsMax;v+=step){E('line',{x1:PL,y1:YH(v),x2:W-PR,y2:YH(v),stroke:'#ffffff14'});
   const t=E('text',{x:PL-5,y:YH(v)+3,'text-anchor':'end',fill:'#6e7681','font-size':fs});t.textContent=v.toFixed(1);}
-if(kMax>10){E('line',{x1:PL,y1:YK(10),x2:W-PR,y2:YK(10),stroke:'#ffffff10'});
-  const t=E('text',{x:PL-5,y:YK(10)+3,'text-anchor':'end',fill:'#6e7681','font-size':fs-1});t.textContent='10';}
+{const rif=METRICA==='vento'?10:8;                 // riga di riferimento della traccia
+ if(kMax>rif){E('line',{x1:PL,y1:YK(rif),x2:W-PR,y2:YK(rif),stroke:'#ffffff10'});
+  const t=E('text',{x:PL-5,y:YK(rif)+3,'text-anchor':'end',fill:'#6e7681','font-size':fs-1});
+  t.textContent=String(rif);}}
 const days=[];D.forEach((d,i)=>{if(!days.length||days[days.length-1].dm!==d.dm)days.push({dm:d.dm,gg:d.gg,i:i});});
 days.forEach((d,k)=>{if(k>0)E('line',{x1:PL+d.i*bw,y1:PT,x2:PL+d.i*bw,y2:yk0,stroke:'#30363d','stroke-dasharray':'3 3'});
   const t=E('text',{x:PL+d.i*bw+3,y:yk0+15,fill:'#8b949e','font-size':fs});
@@ -494,10 +504,11 @@ if(!window.matchMedia||!matchMedia('(prefers-reduced-motion:reduce)').matches){
    line.style.transition='stroke-dashoffset 1s ease';
    requestAnimationFrame(()=>{requestAnimationFrame(()=>{line.style.strokeDashoffset=0;});});}catch(e){}}
 D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:PT+HW+9,width:bw+0.5,height:6,fill:d.sc,opacity:d.l?1:.45});});
-D.forEach((d,i)=>{E('rect',{x:PL+i*bw+bw*0.15,y:YK(d.k),width:bw*0.7,height:yk0-YK(d.k),rx:1,
-  fill:d.wc,'fill-opacity':d.l?1:.5});});
+D.forEach((d,i)=>{const v=M.get(d);
+ E('rect',{x:PL+i*bw+bw*0.15,y:YK(v),width:bw*0.7,height:yk0-YK(v),rx:1,
+  fill:M.col(d),'fill-opacity':d.l?1:.5});});
 let c1=E('text',{x:PL,y:PT-8,fill:'#8b949e','font-size':fs});c1.textContent='onda (m)';
-let c2=E('text',{x:PL,y:yk0-HK-7,fill:'#8b949e','font-size':fs});c2.textContent='vento (kn)';
+let c2=E('text',{x:PL,y:yk0-HK-7,fill:'#8b949e','font-size':fs});c2.textContent=M.lab;
 // Marker del picco: il momento clou si vede senza cercarlo
 let iPk=0;D.forEach((d,i)=>{if(d.h>D[iPk].h)iPk=i;});
 if(D[iPk].h>=0.3){const px=X(iPk),py=YH(D[iPk].h);
@@ -552,10 +563,28 @@ function idx(e){const r=svg.getBoundingClientRect();
 svg.onpointermove=e=>setRO(idx(e),true);
 svg.onpointerdown=e=>setRO(idx(e),true);
 svg.onpointerleave=()=>setRO(0,false);
+// Indice del PICCO di un giorno: e' il momento che interessa ("quando e' meglio
+// quel giorno"). Un +12h fisso saltava al giorno dopo se la giornata era gia'
+// iniziata a meta'.
+function idxPicco(dm){let k=-1;
+ D.forEach((d,i)=>{if(d.dm===dm&&(k<0||d.h>D[k].h))k=i;});return k;}
 const dp=$('dayps');
-if(dp){dp.innerHTML='';days.forEach(d=>{const b=document.createElement('button');b.className='dayp';
- b.textContent=d.gg+' '+d.dm;
- b.onclick=()=>setRO(Math.min(n-1,d.i+12),true);dp.appendChild(b);});}
+if(dp){dp.innerHTML='';
+ // "adesso": riporta al presente dopo aver esplorato il grafico
+ const nb=document.createElement('button');nb.className='dayp dayp-now';
+ nb.textContent='adesso';nb.onclick=()=>setRO(0,false);dp.appendChild(nb);
+ days.forEach(d=>{const b=document.createElement('button');b.className='dayp';
+  b.textContent=d.gg+' '+d.dm;
+  b.onclick=()=>{const k=idxPicco(d.dm);if(k>=0)setRO(k,true);};dp.appendChild(b);});}
+// Le card giorno portano il grafico sul picco di quel giorno
+document.querySelectorAll('.day[data-dm]').forEach(c=>{
+ c.style.cursor='pointer';
+ c.onclick=()=>{const k=idxPicco(c.dataset.dm);
+  if(k>=0){setRO(k,true);svg.scrollIntoView({behavior:'smooth',block:'center'});}};});
+// Selettore della traccia inferiore (vento / periodo)
+document.querySelectorAll('[data-metrica]').forEach(b=>{
+ b.classList.toggle('on',b.dataset.metrica===METRICA);
+ b.onclick=()=>{METRICA=b.dataset.metrica;lastW=0;render();};});
 setRO(0,false);
 // Count-up del numero principale all'ingresso: piccolo tocco, alza molto la
 // percezione di "prodotto vivo". Una volta sola, non a ogni re-render.
@@ -776,6 +805,13 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 .dayp{background:#0d1117;border:1px solid #21262d;color:#8b949e;font-size:11px;
       padding:3px 11px;border-radius:14px;cursor:pointer;font-family:inherit}
 .dayp:hover{color:#e6edf3;border-color:#8b949e}
+.dayp-now{border-color:#1c436e;color:#58a6ff}
+/* selettore traccia inferiore */
+.sw{display:inline-flex;align-items:center;gap:4px}
+.swb{background:transparent;border:1px solid #21262d;color:#6e7681;font-size:11px;
+     padding:2px 9px;border-radius:12px;cursor:pointer;font-family:inherit;transition:.15s}
+.swb:hover{color:#e6edf3;border-color:#8b949e}
+.swb.on{background:#0d2137;border-color:#1c436e;color:#58a6ff;font-weight:600}
 .hint{color:#6e7681;font-style:italic;margin-left:auto}
 .acc{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #21262d;border-radius:12px;padding:14px 18px;margin-bottom:14px}
 .acch{font-size:13px;font-weight:600;margin-bottom:3px}
@@ -793,6 +829,12 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
 @media(max-width:720px){.acgrid{grid-template-columns:1fr}}
 @media(max-width:720px){.hero,.days{grid-template-columns:1fr}}
 @media(max-width:640px){
+ /* Su mobile le onde in fondo non si vedono (il contenuto le copre) e costano
+    batteria: le porto IN CIMA, capovolte, dietro l'intestazione — lì si vedono
+    all'apertura, che e' il momento in cui contano. */
+ .bg svg{bottom:auto;top:0;height:150px;transform:scaleY(-1);opacity:.85}
+ .bg{background:radial-gradient(600px 300px at 50% 0%, #16304a 0%, transparent 65%),
+     linear-gradient(180deg,#0d1117 0%,#0a1420 45%,#081019 100%)}
  body{padding:12px}
  h1{font-size:16px}
  .hs{font-size:32px}
@@ -880,7 +922,8 @@ def build_dashboard(df, wins, embed=False, gate=False):
         bg, fg, bd = TINT[g["stato"]]
         et = STATI[g["stato"]][0]
         win = (f'finestra {g["win"]}' if g["win"] != "—" else 'niente onda')
-        return (f'<div class="card day" style="border-left-color:{fg}">'
+        return (f'<div class="card day" data-dm="{g["data"]:%d/%m}" '
+                f'style="border-left-color:{fg}">'
                 f'<div class="d">{gg(g["data"])} {g["data"]:%d/%m}</div>'
                 f'<div class="h">{g["hs"]:.1f}<small style="font-size:14px;color:#8b949e"> m</small>'
                 f'<span class="db" style="background:{bg};color:{fg};border-color:{bd}">{et}</span></div>'
@@ -1031,7 +1074,9 @@ def build_dashboard(df, wins, embed=False, gate=False):
 </div>
 
 <div class="chart">
-  <div class="ct"><span>{titolo_chart}</span><span id="cnt"></span></div>
+  <div class="ct"><span>{titolo_chart}</span>
+    <span class="sw"><button class="swb" data-metrica="vento">vento</button><button
+      class="swb" data-metrica="periodo">periodo</button> · <span id="cnt"></span></span></div>
   {dayps_html}
   <svg id="ch" viewBox="0 0 940 306" width="100%" style="touch-action:none;cursor:crosshair;display:block"></svg>
   <div class="legend">
