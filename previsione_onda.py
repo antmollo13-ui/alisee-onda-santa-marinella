@@ -362,6 +362,51 @@ def _dati_json(df):
     return out
 
 
+def scrivi_snapshot(df, wins, best):
+    """snapshot.json nel formato che il connettore MCP ALISEE sa gia' leggere.
+    Pubblicato su Pages, diventa la sorgente dati per Claude: da qui nascono
+    alert e contenuti senza lavoro manuale. Campi 'w_ai/wave/dir' = contratto
+    del server esistente; i campi hs_*/tp/stato sono l'estensione surf."""
+    ultima, prossima = orari_run()
+    fc = []
+    for _, r in df.iterrows():
+        fc.append({
+            "date": r.date.strftime("%Y-%m-%d %H:%M"),
+            "w_ai": round(float(r.vento_kn), 1),          # vento (contratto MCP)
+            "dir": round(float(r.vento_dir or 0)),
+            "cardinal": onda_cardinale(r.vento_dir),
+            "wave": round(float(r.hs_alisee), 2),         # onda (contratto MCP)
+            "hs_p10": round(float(r.hs_p10), 2),
+            "hs_p90": round(float(r.hs_p90), 2),
+            "tp_s": round(float(r.tp_alisee), 1),
+            "wave_dir": round(float(r.wave_direction or 0)),
+            "wave_cardinal": onda_cardinale(r.wave_direction),
+            "stato": STATI[r.stato][0],
+            "luce": bool(r.luce),
+        })
+    snap = {
+        "spot": {"id": "santa-marinella", "name": f"{SPOT} (boa di Civitavecchia)",
+                 "lat": LAT_SPOT, "lon": LON_SPOT, "tipo": "surf"},
+        "generato": ultima.strftime("%Y-%m-%d %H:%M"),
+        "prossimo_aggiornamento": prossima.strftime("%Y-%m-%d %H:%M") if prossima else None,
+        "forecast": fc,
+        "finestre": [{"da": a.strftime("%Y-%m-%d %H:%M"), "a": b.strftime("%H:%M"),
+                      "hs_max": round(float(hs), 2), "tp_s": round(float(tp), 1),
+                      "dir": d, "probabile": [round(float(p10), 2), round(float(p90), 2)]}
+                     for a, b, hs, tp, d, p10, p90 in wins],
+        "momento_migliore": (None if best is None else {
+            "quando": best.date.strftime("%Y-%m-%d %H:%M"),
+            "hs": round(float(best.hs_alisee), 2), "tp_s": round(float(best.tp_alisee), 1),
+            "dir": onda_cardinale(best.wave_direction),
+            "vento_kn": round(float(best.vento_kn), 1), "stato": STATI[best.stato][0]}),
+        "precisione": {c: {"alisee": a, "standard": s, "unita": u} for c, a, s, u, _, _ in SKILL},
+        "regole_spot": {"swell_settore": list(SWELL_SETTORE), "hs_grosso_m": HS_GROSSO,
+                        "soglia_finestra_m": 0.8},
+    }
+    with open(os.path.join(BASE, "snapshot.json"), "w", encoding="utf-8") as f:
+        json.dump(snap, f, ensure_ascii=False, separators=(",", ":"))
+
+
 def _sparkline(vals, w=104, h=26):
     """Micro-grafico dell'andamento del giorno dentro la card: l'occhio capisce
     'sale, culmina, cala' senza leggere numeri."""
@@ -1028,7 +1073,8 @@ if __name__ == "__main__":
         "wave_height", "swell_pct", "vento_kn", "vento_dir", "luce", "stato"]] \
         .to_csv(os.path.join(BASE, "previsione_onda_72h.csv"), index=False)
     archivia_previsioni(df)
+    scrivi_snapshot(df, wins, momento_migliore(df72)) # snapshot.json — sorgente MCP
     build_dashboard(df, wins)                        # dashboard.html — completa
     build_dashboard(df, wins, embed=True)            # widget.html — per abbonati
     build_dashboard(df, wins, embed=True, gate=True) # widget-free.html — esca freemium
-    print("\nprevisione_onda_72h.csv + dashboard + widget + widget-free aggiornati.")
+    print("\nCSV + snapshot.json + dashboard + widget + widget-free aggiornati.")

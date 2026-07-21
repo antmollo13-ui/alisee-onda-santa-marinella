@@ -40,6 +40,7 @@ jobs:
           cp dashboard.html site/index.html   # pagina pubblica
           cp widget.html    site/widget.html  # widget incorporabile dal cliente
           cp previsione_onda_72h.csv site/ || true
+          cp snapshot.json  site/ || true     # sorgente dati per il connettore MCP
 
       - name: Genera versione DEMO (tutti i ganci accesi)
         # Pagina di dimostrazione per la trattativa: non e' linkata da nessuna
