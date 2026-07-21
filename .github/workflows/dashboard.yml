@@ -50,6 +50,7 @@ jobs:
           CAM_URL: https://surfcamitalia.it/spot/supertubes/
           SPONSOR: il tuo sponsor qui
           PREMIUM_URL: https://surfcamitalia.it/accedi/
+          UPSELL_URL: https://surfcamitalia.it/accedi/
           NO_ARCHIVIO: "1"    # la demo non archivia: sarebbe un doppione
         run: |
           python previsione_onda.py

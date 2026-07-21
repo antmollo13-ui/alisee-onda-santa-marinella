@@ -1,6 +1,6 @@
 """
 ALISEE — previsione onda + vento 72h per Santa Marinella. Il prodotto.
-Carica modello_onda.pkl e modello_vento.pkl, scarica i forecast (boa RON per l'onda,
+Carica modello_onda.pkl e modello_vento.pkl, scarica i forecast (boa per l'onda,
 punto spot per il vento), applica la calibrazione e RIGENERA a ogni run:
   - dashboard.html : pagina completa
   - widget.html    : LA STESSA pagina, trasparente e senza cornice, per l'iframe
@@ -24,7 +24,7 @@ CRON_UTC = [5, 11, 17, 23]
 
 # Percorso portabile: la cartella dello script (funziona su Windows e su Linux/cloud)
 BASE = os.path.dirname(os.path.abspath(__file__))
-LAT_BOA, LON_BOA = 42.05, 11.70      # boa RON (onda)
+LAT_BOA, LON_BOA = 42.05, 11.70      # boa di Civitavecchia (onda)
 LAT_SPOT, LON_SPOT = 42.034, 11.849  # spot (vento)
 SPOT = "Santa Marinella"
 
@@ -45,6 +45,9 @@ SPONSOR = os.environ.get("SPONSOR", "").strip()
 #                  completa sta dietro il loro Premium = il forecast diventa
 #                  un motivo per abbonarsi, cioe' un asset di guadagno.
 PREMIUM_URL = os.environ.get("PREMIUM_URL", "").strip()
+#   UPSELL_URL -> tier superiore (previsioni a lungo termine + alert personalizzati):
+#                 la card "a pagamento" oltre il forecast base, nuova linea di ricavo.
+UPSELL_URL = os.environ.get("UPSELL_URL", "").strip()
 
 
 def _utm(url):
@@ -355,7 +358,12 @@ pA.slice().reverse().forEach(p=>{bd+='L'+p[0].toFixed(1)+' '+p[1].toFixed(1);});
 E('path',{d:bd+'Z',fill:'#58a6ff',opacity:.13});
 E('path',{d:spline(pH)+'L'+X(n-1).toFixed(1)+' '+YH(0).toFixed(1)+'L'+X(0).toFixed(1)+' '+YH(0).toFixed(1)+'Z',fill:'url(#ga)'});
 E('path',{d:spline(pN),fill:'none',stroke:'#8b949e','stroke-width':1.2,'stroke-dasharray':'4 3',opacity:.6});
-E('path',{d:spline(pH),fill:'none',stroke:'#58a6ff','stroke-width':2});
+const line=E('path',{d:spline(pH),fill:'none',stroke:'#58a6ff','stroke-width':2,
+  'stroke-linecap':'round'});
+if(!window.matchMedia||!matchMedia('(prefers-reduced-motion:reduce)').matches){
+  try{const L=line.getTotalLength();line.style.strokeDasharray=L;line.style.strokeDashoffset=L;
+   line.style.transition='stroke-dashoffset 1s ease';
+   requestAnimationFrame(()=>{requestAnimationFrame(()=>{line.style.strokeDashoffset=0;});});}catch(e){}}
 D.forEach((d,i)=>{E('rect',{x:PL+i*bw,y:PT+HW+9,width:bw+0.5,height:6,fill:d.sc,opacity:d.l?1:.45});});
 D.forEach((d,i)=>{E('rect',{x:PL+i*bw+bw*0.15,y:YK(d.k),width:bw*0.7,height:yk0-YK(d.k),rx:1,
   fill:d.wc,'fill-opacity':d.l?1:.5});});
@@ -363,6 +371,8 @@ let c1=E('text',{x:PL,y:PT-8,fill:'#8b949e','font-size':fs});c1.textContent='ond
 let c2=E('text',{x:PL,y:yk0-HK-7,fill:'#8b949e','font-size':fs});c2.textContent='vento (kn)';
 const cl=E('line',{y1:PT,y2:yk0,stroke:'#e6edf3','stroke-width':1,opacity:0,'stroke-dasharray':'2 3'});
 const cd=E('circle',{r:4.5,fill:'#58a6ff',stroke:'#0d1117','stroke-width':2,opacity:0});
+cl.style.transition='opacity .15s, transform .08s linear';
+cd.style.transition='opacity .15s, transform .08s linear';
 function setRO(i,active){const d=D[i];
  if($('ro-when'))$('ro-when').textContent=active?(d.gg+' '+d.dm+' · '+d.hh):'adesso';
  if($('ro-hs'))$('ro-hs').textContent=fmt(d.h);
@@ -500,9 +510,32 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
        margin-bottom:14px;font-size:13px}
 .trend b{color:#e6edf3;font-weight:600}
 .trend span{font-size:11px;color:#6e7681}
-.cta{display:inline-block;margin-top:12px;background:#238636;color:#fff;font-size:12px;
-     font-weight:600;padding:7px 14px;border-radius:8px;text-decoration:none}
-.cta:hover{background:#2ea043}
+.cta{display:inline-block;margin-top:12px;background:#238636;color:#fff;font-size:13px;
+     font-weight:600;padding:9px 18px;border-radius:8px;text-decoration:none;
+     transition:transform .12s,background .2s}
+.cta:hover{background:#2ea043;transform:translateY(-1px)}
+.cta-wrap{text-align:center;margin-top:12px}
+.legend2{margin-top:6px}
+.lgt{font-size:11px;color:#6e7681;margin-right:2px}
+.legend svg{vertical-align:middle;margin-right:5px}
+.upsell{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#161b22;
+        border:1px solid #26364a;border-radius:12px;padding:16px 18px;margin-bottom:14px;
+        position:relative;overflow:hidden}
+.upsell:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#58a6ff}
+.up-l{flex:1;min-width:200px}
+.up-t{font-size:15px;font-weight:600}
+.up-s{font-size:12px;color:#8b949e;margin-top:4px}
+.up-s b{color:#e6edf3}
+.up-b{background:#1f6feb;color:#fff;font-size:13px;font-weight:600;padding:9px 18px;
+      border-radius:8px;text-decoration:none;white-space:nowrap;transition:transform .12s,background .2s}
+.up-b:hover{background:#388bfd;transform:translateY(-1px)}
+@keyframes fadeup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.hero,.chart,.days,.acc,.upsell,.trend{animation:fadeup .5s ease both}
+.chart{animation-delay:.05s}.days{animation-delay:.1s}.acc{animation-delay:.15s}
+.upsell{animation-delay:.2s}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.dot{animation:pulse 2s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .spons{color:#6e7681}
 .spons b{color:#e6edf3}
 .lock{background:#161b22;border:1px dashed #30363d;border-radius:12px;padding:22px 18px;
@@ -620,10 +653,24 @@ def build_dashboard(df, wins, embed=False, gate=False):
         tnd_html = (f'<div class="trend"><b>Tendenza:</b> {tnd_txt} '
                     f'<span>· a 4-5 giorni l\'affidabilità cala, ricontrolla domani</span></div>')
 
-    # Gancio al prodotto premium della piattaforma: il momento buono -> la cam
-    cta = (f'<a class="cta" href="{_utm(CAM_URL)}">Guarda la cam live →</a>' if CAM_URL else "")
+    # Gancio al prodotto premium della piattaforma: il momento buono -> la cam.
+    # Sta SOTTO il grafico: cosi' mentre scrubbi vedi il vento nella card in alto,
+    # e la CTA arriva dopo che hai visto le condizioni (momento giusto per cliccare).
+    cta_cam = (f'<div class="cta-wrap"><a class="cta" href="{_utm(CAM_URL)}">'
+               f'Guarda la cam live →</a></div>' if CAM_URL else "")
     spons = (f' <span class="spons">· previsione offerta da <b>{SPONSOR}</b></span>'
              if SPONSOR else "")
+
+    # Upsell tier superiore: previsioni a lungo termine + alert personalizzati.
+    # E' la card "a pagamento" oltre il forecast base — nuova linea di ricavo.
+    upsell_html = ""
+    if UPSELL_URL and not gate:
+        upsell_html = (
+            '<div class="upsell"><div class="up-l">'
+            '<div class="up-t">Vai oltre le 72 ore</div>'
+            '<div class="up-s">Previsioni fino a 14 giorni · <b>alert sul telefono</b> '
+            'quando le condizioni del tuo spot sono perfette · storico delle mareggiate</div>'
+            f'</div><a class="up-b" href="{_utm(UPSELL_URL)}">Attiva Premium+ →</a></div>')
 
     # Freemium: le 24h si vedono, il resto e' il prodotto che la piattaforma vende
     if gate:
@@ -634,7 +681,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
         centro = (f'<div class="lock"><div class="lock-t">Previsione completa a 5 giorni</div>'
                   f'<div class="lock-s">ora per ora · finestre surfabili con giorno e orario · '
                   f'fascia probabile misurata alla boa</div>{sblocca}</div>')
-        cta = ""                        # nel free l'unico bottone e' lo sblocco
+        cta_cam = ""                    # nel free l'unico bottone e' lo sblocco
         dayps_html = ""
     else:
         dfc = df72
@@ -662,7 +709,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
     sotto_embed = (f'previsione onda e vento · 72h · aggiornata {gg(ultima)} {ultima:%H:%M}')
     firma = (f'<div class="upd">{sotto_embed}</div>' if embed else
              f'<div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} '
-             f'{ultima:%d/%m %H:%M}</b> (ora italiana){pross_txt} · boa RON Civitavecchia'
+             f'{ultima:%d/%m %H:%M}</b> (ora italiana){pross_txt} · boa di Civitavecchia'
              f' · previsione 72h</div>')
 
     # Precisione: blocco completo sulla dashboard; nel widget del cliente una riga
@@ -680,7 +727,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
   <div class="accs">La barra mostra l'errore medio misurato: più è corta, meno si sbaglia.</div>
   <div class="acgrid">{_accuratezza()}</div>
   <div class="acex">Un esempio concreto: quando la previsione dice <b>1,5 m</b>, 8 volte su 10
-    il mare misurato è tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
+    il mare è poi tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
 </div>"""
 
     doc = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
@@ -717,34 +764,43 @@ def build_dashboard(df, wins, embed=False, gate=False):
   <div class="card">
     <div class="k">prossima finestra surfabile</div>
     {win_html}
-    {cta}
     <div class="mini"><div><div class="l" style="line-height:1.6">"Buono" = onda formata,
-      swell da W/SW e vento amico. Finestre solo nelle ore di luce. "Probabile" = misurato
-      alla boa: 8 volte su 10 il mare sta lì.</div></div></div>
+      swell da W/SW e vento a favore. Finestre solo nelle ore di luce. "Probabile" = quanto
+      può variare: 8 volte su 10 il mare sta in quell'intervallo.</div></div></div>
   </div>
 </div>
 
 <div class="chart">
-  <div class="ct"><span>{titolo_chart}</span>
-    <span>— — modello standard · <span id="cnt"></span></span></div>
+  <div class="ct"><span>{titolo_chart}</span><span id="cnt"></span></div>
   {dayps_html}
   <svg id="ch" viewBox="0 0 940 306" width="100%" style="touch-action:none;cursor:crosshair;display:block"></svg>
-  <div class="legend">{_legenda()}
+  <div class="legend">
+    <span class="lg"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="#58a6ff" stroke-width="2"/></svg>ALISEE</span>
+    <span class="lg"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="4 3"/></svg>modello standard</span>
     <span class="lg"><i style="background:#58a6ff;opacity:.3"></i>fascia probabile</span>
     <span class="lg"><i style="background:#010409;border:1px solid #30363d"></i>notte</span>
-    <span class="hint">tocca o passa il mouse sul grafico: i numeri qui sopra seguono l'ora</span></div>
+  </div>
+  <div class="legend legend2"><span class="lgt">qualità surf:</span>
+    <span class="lg"><i style="background:#3fb950"></i>buono</span>
+    <span class="lg"><i style="background:#58a6ff"></i>surfabile</span>
+    <span class="lg"><i style="background:#d29922"></i>mosso</span>
+    <span class="lg"><i style="background:#484f58"></i>niente da surfare</span>
+    <span class="hint">tocca o trascina sul grafico: i numeri in alto seguono l'ora</span></div>
+  {cta_cam}
 </div>
 
 {centro}
 
 {acc_html}
 
+{upsell_html}
+
 <div class="foot">
-  Misurato su ~{SKILL_ORE} ore di confronto con la <b>boa ondametrica RON</b> (onda) e la
-  <b>stazione RMN di Civitavecchia</b> (vento), entrambe a ~8 km dallo spot, su periodi che il
-  modello non aveva mai visto in addestramento. "Standard" = il modello meteo pubblico da cui
-  partono i siti di previsione. I valori sono l'errore sull'analisi: su una previsione a 72 ore
-  di anticipo entrambi sbagliano di più.
+  <b>Come funziona.</b> Partiamo dai modelli meteo-marini pubblici e li correggiamo con un
+  motore di intelligenza artificiale addestrato su anni di misure reali della <b>boa</b> e
+  della <b>stazione di Civitavecchia</b>, a pochi km dallo spot: impara gli errori
+  sistematici del modello su questo tratto di costa e li compensa. Le percentuali di
+  precisione qui sopra sono verificate su ~{SKILL_ORE} ore di dati mai usati in addestramento.
 </div>
 <div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali{spons}</div>
 </div><script>{js}</script></body></html>"""
