@@ -10,6 +10,8 @@
 !previsione_onda.py
 !onda_features.py
 !vento_features.py
+# Design (palette, CSS, sfondo, grafico): l'unico file da toccare per un redesign
+!stile.py
 
 # Modelli addestrati
 !modello_onda.pkl
