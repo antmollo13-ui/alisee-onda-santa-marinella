@@ -708,10 +708,14 @@ body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,
 @keyframes drift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .wrap{max-width:1000px;margin:0 auto;position:relative}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px}
-h1{font-size:19px;font-weight:600;letter-spacing:-.01em}
-h1 span{color:#58a6ff}
-h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
-.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:6px}
+.brandrow{display:flex;align-items:center;gap:12px}
+.logo{flex:none;border-radius:9px}
+h1{font-size:23px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
+.tsub{font-size:12px;color:#6e7681;margin-top:2px;letter-spacing:.01em}
+.tsub b{color:#58a6ff;font-weight:600;letter-spacing:.04em}
+.tsub .x{color:#484f58;margin:0 3px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;
+     margin-left:8px;vertical-align:middle}
 .upd{font-size:12px;color:#6e7681}
 /* "adesso" a tutta larghezza: il momento migliore ora sta sotto il grafico,
    dove ha senso leggerlo (dopo aver visto l'andamento). */
@@ -848,7 +852,9 @@ h1 .x{color:#6e7681;font-weight:400;margin:0 2px}
  .bg{background:radial-gradient(600px 300px at 50% 0%, #16304a 0%, transparent 65%),
      linear-gradient(180deg,#0d1117 0%,#0a1420 45%,#081019 100%)}
  body{padding:12px}
- h1{font-size:16px}
+ h1{font-size:20px}
+ .brandrow{gap:10px}
+ .logo{width:26px;height:26px}
  .hs{font-size:32px}
  .card{padding:12px 14px}
  .now{gap:12px}
@@ -1002,14 +1008,19 @@ def build_dashboard(df, wins, embed=False, gate=False):
               f'border-color:{nbd}"><div class="vb-t">{lbl}</div>'
               f'<div class="vb-s">qualità surf</div></div>')
 
-    # Marchio: solo ALISEE, oppure "ALISEE × Partner" se il co-branding e' acceso.
-    marchio = (f'ALISEE <span class="x">×</span> {PARTNER}' if PARTNER
-               else 'ALISEE <span>Onda</span>')
-
-    # Sulla pagina del cliente il nome dello spot e' gia' nel titolo della loro
-    # pagina: qui conta la previsione, e il marchio.
-    titolo = (f'<h1><span class="dot"></span>{marchio}</h1>' if embed
-              else f'<h1><span class="dot"></span>{marchio} · {SPOT}</h1>')
+    # Gerarchia del titolo: lo SPOT e' cio' che il lettore cerca (dove?), il
+    # marchio e' la firma sotto. Prima erano sulla stessa riga separati da
+    # simboli diversi: affollato e con l'ordine sbagliato.
+    logo = ('<svg class="logo" viewBox="0 0 32 32" width="30" height="30">'
+            '<rect width="32" height="32" rx="9" fill="#0d2137"/>'
+            '<path d="M4 20c4-6 7 4 11-2s6 3 12-3" stroke="#58a6ff" stroke-width="2.6"'
+            ' fill="none" stroke-linecap="round"/></svg>')
+    firma_brand = (f'<b>ALISEE</b> <span class="x">×</span> {PARTNER}' if PARTNER
+                   else '<b>ALISEE</b> weather intelligence')
+    titolo = (f'<div class="brandrow">{logo}<div>'
+              f'<h1>{SPOT}<span class="dot" title="aggiornata"></span></h1>'
+              f'<div class="tsub">previsione onda e vento · {firma_brand}</div>'
+              f'</div></div>')
     sotto_embed = (f'previsione onda e vento · 72h · aggiornata {gg(ultima)} {ultima:%H:%M}')
     firma = (f'<div class="upd">{sotto_embed}</div>' if embed else
              f'<div class="upd">ultima run <b style="color:#8b949e">{gg(ultima)} '
