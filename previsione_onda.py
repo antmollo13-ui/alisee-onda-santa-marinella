@@ -48,6 +48,14 @@ PREMIUM_URL = os.environ.get("PREMIUM_URL", "").strip()
 #   UPSELL_URL -> tier superiore (previsioni a lungo termine + alert personalizzati):
 #                 la card "a pagamento" oltre il forecast base, nuova linea di ricavo.
 UPSELL_URL = os.environ.get("UPSELL_URL", "").strip()
+#   CF_BEACON  -> token Cloudflare Web Analytics: quante volte il widget viene
+#                 caricato e DA QUALE SITO (referrer). Gratis, SENZA COOKIE e
+#                 senza tracciamento individuale -> nessun banner consenso.
+#                 E' l'unico modo per sapere se il widget viene davvero usato.
+CF_BEACON = os.environ.get("CF_BEACON", "").strip()
+#   EVENTI_URL -> endpoint (opzionale) per contare i click sui bottoni: il widget
+#                 manda un ping "cam"/"premium"/"upsell" con sendBeacon.
+EVENTI_URL = os.environ.get("EVENTI_URL", "").strip()
 
 
 def _utm(url):
@@ -57,6 +65,23 @@ def _utm(url):
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}utm_source=alisee&utm_medium=widget"
+
+
+def _analytics():
+    """Misura d'uso del widget. Cloudflare Web Analytics: nessun cookie, nessun
+    profilo individuale -> niente banner consenso, utilizzabile anche dentro il
+    sito di un cliente. Piu' (opzionale) il ping dei click sui bottoni."""
+    out = ""
+    if CF_BEACON:
+        out += ('<script defer src="https://static.cloudflareinsights.com/beacon.min.js" '
+                f"data-cf-beacon='{{\"token\":\"{CF_BEACON}\"}}'></script>")
+    if EVENTI_URL:
+        out += ("<script>document.addEventListener('click',function(e){"
+                "var a=e.target.closest('a[data-ev]');if(!a)return;"
+                "try{navigator.sendBeacon('" + EVENTI_URL + "',"
+                "JSON.stringify({ev:a.dataset.ev,spot:'" + SPOT + "',t:Date.now()}));}"
+                "catch(_){}}); </script>")
+    return out
 
 # Skill validata OOS in UNITA' REALI (non percentuali astratte).
 # Fonte: alisee_onda.py (test 2026, 4.666 ore) e alisee_vento.py (test 2025, 8.571 ore),
@@ -801,7 +826,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
     # Gancio al prodotto premium della piattaforma: il momento buono -> la cam.
     # Sta SOTTO il grafico: cosi' mentre scrubbi vedi il vento nella card in alto,
     # e la CTA arriva dopo che hai visto le condizioni (momento giusto per cliccare).
-    cta_cam = (f'<div class="cta-wrap"><a class="cta" href="{_utm(CAM_URL)}">'
+    cta_cam = (f'<div class="cta-wrap"><a class="cta" data-ev="cam" href="{_utm(CAM_URL)}">'
                f'Guarda la cam live →</a></div>' if CAM_URL else "")
     spons = (f' <span class="spons">· previsione offerta da <b>{SPONSOR}</b></span>'
              if SPONSOR else "")
@@ -815,13 +840,13 @@ def build_dashboard(df, wins, embed=False, gate=False):
             '<div class="up-t">Vai oltre le 72 ore</div>'
             '<div class="up-s">Previsioni fino a 14 giorni · <b>alert sul telefono</b> '
             'quando le condizioni del tuo spot sono perfette · storico delle mareggiate</div>'
-            f'</div><a class="up-b" href="{_utm(UPSELL_URL)}">Attiva Premium+ →</a></div>')
+            f'</div><a class="up-b" data-ev="upsell" href="{_utm(UPSELL_URL)}">Attiva Premium+ →</a></div>')
 
     # Freemium: le 24h si vedono, il resto e' il prodotto che la piattaforma vende
     if gate:
         dfc = df72[df72.date < t0 + pd.Timedelta("24h")]
         titolo_chart = "onda e vento · prossime 24 ore"
-        sblocca = (f'<a class="cta" href="{_utm(PREMIUM_URL)}">Sblocca con Premium →</a>'
+        sblocca = (f'<a class="cta" data-ev="premium" href="{_utm(PREMIUM_URL)}">Sblocca con Premium →</a>'
                    if PREMIUM_URL else "")
         centro = (f'<div class="lock"><div class="lock-t">Previsione completa a 5 giorni</div>'
                   f'<div class="lock-s">ora per ora · finestre surfabili con giorno e orario · '
@@ -972,7 +997,7 @@ def build_dashboard(df, wins, embed=False, gate=False):
   precisione qui sopra sono verificate su ~{SKILL_ORE} ore di dati mai usati in addestramento.
 </div>
 <div class="brand"><b>ALISEE</b> · weather intelligence — previsioni calibrate su strumenti reali{spons}</div>
-</div><script>{js}</script></body></html>"""
+</div><script>{js}</script>{_analytics()}</body></html>"""
     nome = ("widget-free.html" if gate else
             "widget.html" if embed else "dashboard.html")
     with open(os.path.join(BASE, nome), "w", encoding="utf-8") as f:
