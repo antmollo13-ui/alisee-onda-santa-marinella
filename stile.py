@@ -307,7 +307,8 @@ const cw=Math.max(320,Math.round(svg.getBoundingClientRect().width)
 // il ResizeObserver riscatterebbe all'infinito. Ridisegna solo se la LARGHEZZA
 // e' davvero cambiata (>4px), non a ogni micro-variazione di altezza.
 if(Math.abs(cw-lastW)<5) return; lastW=cw;
-svg.innerHTML='';
+// Safari: innerHTML su elementi SVG e' inaffidabile -> svuoto via DOM
+while(svg.firstChild)svg.removeChild(svg.firstChild);
 const mob=cw<560;
 // PT ampio: sopra il grafico ci va l'etichetta data/ora che segue il puntatore
 // GAP piu' ampio: fra onda e traccia inferiore ci sta la FASCIA QUALITA' SURF
@@ -339,11 +340,18 @@ const days=[];D.forEach((d,i)=>{if(!days.length||days[days.length-1].dm!==d.dm)d
 days.forEach((d,k)=>{if(k>0)E('line',{x1:PL+d.i*bw,y1:PT,x2:PL+d.i*bw,y2:yk0,stroke:'#30363d','stroke-dasharray':'3 3'});
   const t=E('text',{x:PL+d.i*bw+3,y:yk0+15,fill:'#8b949e','font-size':fs});
   t.textContent=mob?(d.gg+' '+d.dm.slice(0,2)):(d.gg+' '+d.dm);});
-const defs=document.createElementNS(svg.namespaceURI,'defs');
-defs.innerHTML='<linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">'
- +'<stop offset="0" stop-color="#58a6ff" stop-opacity="0.35"/>'
- +'<stop offset="1" stop-color="#58a6ff" stop-opacity="0.02"/></linearGradient>';
-svg.appendChild(defs);
+// Gradiente dell'area onda creato via DOM: con innerHTML il parser HTML perde
+// il namespace SVG e su Safari il gradiente non nasce (area invisibile).
+const NS='http://www.w3.org/2000/svg';
+const defs=document.createElementNS(NS,'defs');
+const grad=document.createElementNS(NS,'linearGradient');
+grad.setAttribute('id','ga');grad.setAttribute('x1','0');grad.setAttribute('y1','0');
+grad.setAttribute('x2','0');grad.setAttribute('y2','1');
+[['0','0.35'],['1','0.02']].forEach(function(v){
+ const st=document.createElementNS(NS,'stop');
+ st.setAttribute('offset',v[0]);st.setAttribute('stop-color','#58a6ff');
+ st.setAttribute('stop-opacity',v[1]);grad.appendChild(st);});
+defs.appendChild(grad);svg.appendChild(defs);
 function spline(p){if(p.length<2)return'';let s='M'+p[0][0].toFixed(1)+' '+p[0][1].toFixed(1);
  for(let i=0;i<p.length-1;i++){const a=p[Math.max(0,i-1)],b=p[i],c=p[i+1],d=p[Math.min(p.length-1,i+2)];
   s+='C'+(b[0]+(c[0]-a[0])/6).toFixed(1)+' '+(b[1]+(c[1]-a[1])/6).toFixed(1)+' '
