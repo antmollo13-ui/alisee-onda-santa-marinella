@@ -19,7 +19,7 @@
 
 # Ambiente + automazione
 !requirements.txt
-!CNAME
+# !CNAME  <- riattivare SOLO dopo aver configurato il DNS (vedi workflow)
 !.github/
 !.github/workflows/
 !.github/workflows/dashboard.yml

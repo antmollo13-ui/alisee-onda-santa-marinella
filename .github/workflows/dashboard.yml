@@ -37,7 +37,10 @@ jobs:
       - name: Prepara la cartella da pubblicare
         run: |
           mkdir -p site
-          cp CNAME site/                      # dominio custom: senza questo si perde a ogni deploy
+          # NB: il dominio custom (CNAME) si attiva SOLO quando il DNS punta a
+          # GitHub. Con il file presente e il DNS non pronto, Pages reindirizza
+          # github.io al dominio che non risolve -> sito irraggiungibile.
+          # Riattivare copiando qui il file CNAME dopo aver configurato il DNS.
           cp dashboard.html site/index.html   # pagina pubblica
           cp widget.html    site/widget.html  # widget incorporabile dal cliente
           cp previsione_onda_72h.csv site/ || true
