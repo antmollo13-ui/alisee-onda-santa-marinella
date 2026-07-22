@@ -96,6 +96,11 @@ SKILL = [
 ]
 SKILL_ORE = "13.000"   # ore di confronto totali (onda 4.666 + vento 8.571)
 
+# Scala misurata con una REGRESSIONE sulle stesse ore (regressione.py): la
+# pendenza dice se il modello rispetta le proporzioni. 1 = scala giusta;
+# sotto 1 = comprime, cioe' piu' il mare cresce piu' lo sottostima.
+SCALA = [("onda",  0.875, 0.985), ("vento", 0.840, 1.011)]
+
 # ── Regole dello spot (dalle schede SurfCamItalia di Santa Marinella:
 #    Banzai "swell da W, SW e NW"; Supertubos "swell ideale da W e SW,
 #    con mare molto grande diventa impegnativo").
@@ -597,12 +602,24 @@ def build_dashboard(df, wins, embed=False, gate=False):
         acc_html = (f'<div class="acc"><div class="accs" style="margin:0">'
                     f'Verificata sul mare vero — errore medio: {vals}.</div></div>')
     else:
+        scala_html = "".join(
+            f'<span class="acs"><i>{c}</i>'
+            f'<b class="no">{f"{std:.2f}".replace(".", ",")}</b> standard'
+            f'<b class="si">{f"{ali:.2f}".replace(".", ",")}</b> ALISEE</span>'
+            for c, std, ali in SCALA)
         acc_html = f"""<div class="acc">
   <div class="acch">Verificata sul mare vero</div>
   <div class="accs">La barra mostra l'errore medio misurato: più è corta, meno si sbaglia.</div>
   <div class="acgrid">{_accuratezza()}</div>
   <div class="acex">Un esempio concreto: quando la previsione dice <b>1,5 m</b>, 8 volte su 10
     il mare è poi tra <b>1,1 e 1,8 m</b> — è la "fascia probabile" che vedi nel grafico.</div>
+  <div class="acscale">
+    <div class="acsh">Perché quando diciamo 2 m sono 2 m</div>
+    Sulle stesse ore abbiamo misurato anche la <b>scala</b>: si confronta ogni previsione
+    con la misura reale e si guarda se le proporzioni tengono (1,00 = scala giusta).
+    I modelli pubblici <b>comprimono</b>: più il mare cresce, più lo sottostimano.
+    <div class="acsg">{scala_html}</div>
+    Per questo altrove le mareggiate arrivano sempre più grandi del previsto. Qui no.</div>
 </div>"""
 
     # Anteprima quando il link viene condiviso (WhatsApp, IG, Telegram): senza
