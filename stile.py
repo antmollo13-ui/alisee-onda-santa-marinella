@@ -208,19 +208,40 @@ h1{font-size:23px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
  h1{font-size:20px}
  .brandrow{gap:10px}
  .logo{width:26px;height:26px}
- .hs{font-size:32px}
- .card{padding:12px 14px}
+ .hs{font-size:34px}
+ .card{padding:13px 14px}
  .now{gap:12px}
  .mini{grid-template-columns:repeat(2,1fr);gap:12px 10px}
  .vbadge{margin-left:auto;padding:8px 12px}
  .vbadge .vb-t{font-size:16px}
  .hero{gap:10px;margin-bottom:10px}
- .days{gap:8px;margin-bottom:10px}
  .chart{padding:10px 8px 6px;margin-bottom:10px}
  .top{margin-bottom:12px}
  .upd{font-size:11px}
  .hint{display:none}
  .acc{padding:12px 14px}
+ /* TOCCO: 23px non si centrano col dito. Apple raccomanda ~44px: alzo i
+    bersagli con il padding e li rendo scorrevoli invece di mandarli a capo. */
+ .dayps{flex-wrap:nowrap;overflow-x:auto;gap:8px;padding-bottom:4px;
+        scrollbar-width:none;-webkit-overflow-scrolling:touch}
+ .dayps::-webkit-scrollbar{display:none}
+ .dayp{padding:12px 15px;font-size:12px;border-radius:20px;flex:none}
+ .swb{padding:11px 15px;font-size:12px;border-radius:18px}
+ .sw{gap:6px}
+ /* LEGGIBILITA': niente sotto 11px su schermo piccolo */
+ .mini .l,.vbadge .vb-s,.tag,.legend,.acr,.acn,.day .w{font-size:11px}
+ .lgt,.foot,.best-foot{font-size:11px}
+ /* SCROLL: le card giorno da blocchi impilati a righe compatte (una per giorno):
+    stessa informazione, un terzo dell'altezza. */
+ .days{display:block;margin-bottom:10px}
+ .day{display:grid;grid-template-columns:auto auto 1fr;align-items:center;
+      gap:10px;padding:11px 14px;margin-bottom:8px;border-radius:0 10px 10px 0}
+ .day .d{margin:0;font-size:12px;min-width:62px}
+ .day .h{font-size:19px;gap:6px}
+ .day .h .db{font-size:11px;padding:2px 8px}
+ .day .w{margin:0;font-size:11px;text-align:right;line-height:1.35}
+ .sparkwrap{display:none}
+ .best{padding:13px 14px}
 }
 """
 
