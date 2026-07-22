@@ -47,8 +47,13 @@ TINT = {
 
 CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
+/* CONTENIMENTO: basta un elemento piu' largo del viewport (una riga che non va
+   a capo, una fila di pillole) e il telefono rimpicciolisce TUTTA la pagina.
+   Qui si blocca la propagazione alla radice. */
+html,body{max-width:100%;overflow-x:hidden}
 body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,sans-serif;
-     padding:24px;line-height:1.5;-webkit-font-smoothing:antialiased}
+     padding:24px;line-height:1.5;-webkit-font-smoothing:antialiased;
+     overflow-wrap:break-word}
 /* Sfondo: profondita' marina + onde in SVG (nessuna immagine esterna, peso zero).
    Volutamente TENUE: e' uno strumento di dati, lo sfondo non deve competere. */
 .bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;
@@ -59,7 +64,7 @@ body{background:#0d1117;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,
 .bg .w1{animation:drift 46s linear infinite}
 .bg .w2{animation:drift 78s linear infinite reverse}
 @keyframes drift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-.wrap{max-width:1000px;margin:0 auto;position:relative}
+.wrap{width:100%;max-width:1000px;margin:0 auto;position:relative;min-width:0}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px}
 .brandrow{display:flex;align-items:center;gap:12px}
 .logo{flex:none;border-radius:9px}
@@ -133,7 +138,8 @@ h1{font-size:23px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
 .brand{margin-top:10px;font-size:12px;color:#6e7681}
 .brand b{color:#58a6ff;letter-spacing:.03em}
 .trend{background:rgba(22,27,34,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid #21262d;border-radius:12px;padding:10px 18px;
-       margin-bottom:14px;font-size:13px}
+       margin-bottom:14px;font-size:13px;max-width:100%;min-width:0;
+       white-space:normal;overflow-wrap:break-word}
 .trend b{color:#e6edf3;font-weight:600}
 .trend span{font-size:11px;color:#6e7681}
 .cta{display:inline-block;margin-top:12px;background:#238636;color:#fff;font-size:13px;
@@ -223,7 +229,8 @@ h1{font-size:23px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
  /* TOCCO: 23px non si centrano col dito. Apple raccomanda ~44px: alzo i
     bersagli con il padding e li rendo scorrevoli invece di mandarli a capo. */
  .dayps{flex-wrap:nowrap;overflow-x:auto;gap:8px;padding-bottom:4px;
-        scrollbar-width:none;-webkit-overflow-scrolling:touch}
+        scrollbar-width:none;-webkit-overflow-scrolling:touch;
+        max-width:100%;min-width:0}
  .dayps::-webkit-scrollbar{display:none}
  .dayp{padding:12px 15px;font-size:12px;border-radius:20px;flex:none}
  .swb{padding:11px 15px;font-size:12px;border-radius:18px}
